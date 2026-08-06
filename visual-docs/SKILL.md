@@ -32,8 +32,8 @@ Both live next to this file. This skill is self-contained — it depends on no o
 2. **Read `design-system.md`** for the exact palette, type stack, and layout devices. Build from its tokens.
 3. **Adapt to the subject** — assign the ONE bold accent to the subject's conceptual crux; map role hues to the subject's own categories. Don't reuse the reference hues verbatim.
 4. **Build self-contained HTML** — inline CSS/JS, no external assets; both light + dark via `:root` tokens + `prefers-color-scheme` AND `data-theme` overrides; responsive with `overflow-x:auto` on wide content; `<title>` + emoji favicon.
-5. **Deliver the repo file** — write a standalone `.html` (full `<!DOCTYPE>`) into the repo (e.g. `docs/`) so it lives with the code, and give the user the path.
-6. **Also publish it, if the harness can.** When a page-publishing tool is available (e.g. Claude Code's Artifact tool), publish a hosted copy too — don't wait to be asked — and hand the user both the repo path and the link. Such hosts typically wrap their own `<head>`/`<body>`, so publish a **body-fragment** copy: no `<!DOCTYPE>`/`<html>`/`<head>`/`<body>` tags, keeping the `<style>`, content, and `<script>`. Drop any custom theme-toggle button from the fragment — the host supplies its own toggle, stamping `data-theme` on the root, which the tokens already handle. Pass an emoji favicon and a one-line description. With no such tool, the standalone file is the whole deliverable.
+5. **Deliver the local file** — write a standalone `.html` (full `<!DOCTYPE>`) into the repo (e.g. `docs/`) so it lives with the code, give the user the path, and stop. The local file is the whole deliverable; publishing is a separate request, never a bonus you add on your own.
+6. **Publish only when the user asked for a hosted copy.** The predicate is an explicit request in their words — "publish it", "host it", "give me a link", "share it", "put it on claude.ai". Anything short of that (a page-publishing tool being available, the page looking shareable, the user seeming likely to want a link) means do not publish; offer the option in one sentence instead. When they do ask: hosts typically wrap their own `<head>`/`<body>`, so publish a **body-fragment** copy — no `<!DOCTYPE>`/`<html>`/`<head>`/`<body>` tags, keeping the `<style>`, content, and `<script>`. Drop any custom theme-toggle button from the fragment — the host supplies its own toggle, stamping `data-theme` on the root, which the tokens already handle. Pass an emoji favicon and a one-line description, then report both the local path and the URL.
 7. **Verify** — run the checklist at the end of `page-craft.md`: both themes legible, toggle wins over OS preference, no horizontal body scroll, no silent font fallback, keyboard focus visible.
 
 ## Quick Reference — the identity
@@ -46,6 +46,7 @@ Both live next to this file. This skill is self-contained — it depends on no o
 
 ## Common Mistakes
 
+- Publishing a hosted copy the user never asked for. The local `.html` is the deliverable; a link happens only on explicit request.
 - Copying the reference palette verbatim instead of adapting the accent + role hues to the subject.
 - Skipping the dark theme, or inverting it naively — give it equal care.
 - Numbered markers on content that isn't actually a sequence.
