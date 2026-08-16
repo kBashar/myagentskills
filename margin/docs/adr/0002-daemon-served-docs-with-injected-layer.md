@@ -1,0 +1,3 @@
+# Daemon-served docs with an injected layer
+
+Generated docs stay pristine, self-contained HTML files (the visual-docs principle). Instead of baking annotation JavaScript into every generated file, the margin daemon **serves** the file and injects the annotation layer at serve time. Rejected alternative: embedding the snippet at generation time — it forces port discovery and cross-origin calls from `file://` pages, pollutes docs that may never be annotated, and makes live-reload fragile. Serving gives same-origin API access, one injection point to maintain, and SSE live-reload for free. Opening the raw file directly still works; it simply shows the plain doc.
