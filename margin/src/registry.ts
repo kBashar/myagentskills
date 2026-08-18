@@ -32,7 +32,7 @@ export type DocLookup =
   | { kind: 'conflict'; id: string; projects: string[] }
   | { kind: 'missing' };
 
-export function create(): Registry {
+export function createRegistry(): Registry {
   return { projects: Object.create(null), conflicts: Object.create(null) };
 }
 
@@ -90,7 +90,7 @@ export function applyEvent(reg: Registry, event: journal.JournalEvent): void {
 }
 
 export function load(home: string): Registry {
-  const reg = create();
+  const reg = createRegistry();
   for (const event of journal.readAll(home)) applyEvent(reg, event);
   return reg;
 }

@@ -2,8 +2,9 @@
 // truth. The daemon is the only process that appends to it; the doc registry
 // is derived by replaying it, so crashes never lose state. Later tickets add
 // annotation and status-change event types alongside `doc.registered`.
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { ensureHome } from './paths';
 
 export const JOURNAL_VERSION = 1;
 
@@ -14,7 +15,7 @@ export function journalFile(home: string): string {
 }
 
 export function append(home: string, event: JournalEvent): void {
-  mkdirSync(home, { recursive: true, mode: 0o700 });
+  ensureHome(home);
   const record = JSON.stringify({ v: JOURNAL_VERSION, ts: new Date().toISOString(), ...event });
   appendFileSync(journalFile(home), record + '\n', { mode: 0o600 });
 }

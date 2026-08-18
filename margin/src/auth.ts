@@ -1,6 +1,8 @@
 // Auth quarantine (ADR-0003): ALL token generation, token verification, and
-// token-scoped URL construction lives in this module. No other file may mint,
-// extract, compare, or embed tokens into URLs.
+// token-scoped URL construction lives in this module. No other file in src/
+// may mint, extract, compare, or embed tokens into URLs. (Tests hand-build
+// `?t=` URLs on purpose: they pin the public wire contract that this
+// quarantine exists to protect.)
 //
 // The token exists because annotations are instructions an autonomous agent
 // will act on: without it, any website open in the browser could blind-POST

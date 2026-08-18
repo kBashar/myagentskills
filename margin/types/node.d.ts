@@ -132,6 +132,7 @@ declare module 'node:child_process' {
   export interface ChildProcess {
     pid?: number;
     unref(): void;
+    once(event: string, listener: (...args: any[]) => void): void;
   }
   export function spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess;
   export interface SpawnSyncOptions {

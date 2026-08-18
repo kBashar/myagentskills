@@ -23,15 +23,20 @@ export const MAX_BODY_BYTES = 1024 * 1024;
 export class HttpError extends Error {
   constructor(
     public status: number,
-    message: string,
-    public expose: boolean = true
+    message: string
   ) {
     super(message);
   }
 }
 
-function httpError(status: number, message: string): HttpError {
-  return new HttpError(status, message);
+// One message for every doc-id conflict the journal produced at replay —
+// surfaced at serve time and at registration alike.
+function conflictError(id: string, projects: string[]): HttpError {
+  return new HttpError(
+    409,
+    `doc id ${JSON.stringify(id)} is registered under multiple projects (${projects.join(', ')}); ` +
+      `the journal is corrupt and margin will not serve or accept an arbitrary entry`
+  );
 }
 
 export interface DaemonContext {
@@ -58,7 +63,7 @@ function readBody(req: IncomingMessage): Promise<string> {
       if (size > MAX_BODY_BYTES) {
         settled = true;
         req.resume(); // drain so the response can still be sent
-        reject(httpError(413, 'request body too large'));
+        reject(new HttpError(413, 'request body too large'));
         return;
       }
       chunks.push(chunk);
@@ -93,37 +98,30 @@ async function handleRegister(ctx: DaemonContext, req: IncomingMessage, res: Ser
   try {
     body = JSON.parse(raw) as RegisterBody;
   } catch {
-    throw httpError(400, 'request body must be JSON');
+    throw new HttpError(400, 'request body must be JSON');
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw httpError(400, 'request body must be a JSON object');
+    throw new HttpError(400, 'request body must be a JSON object');
   }
   const { docId, agent, session } = body;
-  if (typeof body.path !== 'string' || !body.path) throw httpError(400, 'missing required field: path');
-  if (!isAbsolute(body.path)) throw httpError(400, `path must be absolute: ${JSON.stringify(body.path)}`);
-  if (typeof body.project !== 'string' || !body.project) throw httpError(400, 'missing required field: project');
+  if (typeof body.path !== 'string' || !body.path) throw new HttpError(400, 'missing required field: path');
+  if (!isAbsolute(body.path)) throw new HttpError(400, `path must be absolute: ${JSON.stringify(body.path)}`);
+  if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'missing required field: project');
   if (docId != null && (typeof docId !== 'string' || !registry.isValidDocId(docId))) {
-    throw httpError(400, `invalid doc id: ${JSON.stringify(docId)} (must match ${registry.DOC_ID_RE})`);
+    throw new HttpError(400, `invalid doc id: ${JSON.stringify(docId)} (must match ${registry.DOC_ID_RE})`);
   }
-  if (agent != null && typeof agent !== 'string') throw httpError(400, 'agent must be a string');
-  if (session != null && typeof session !== 'string') throw httpError(400, 'session must be a string');
+  if (agent != null && typeof agent !== 'string') throw new HttpError(400, 'agent must be a string');
+  if (session != null && typeof session !== 'string') throw new HttpError(400, 'session must be a string');
 
   // The shared doc-file validator — the CLI ran the same check before calling.
   const check = validateDocFile(body.path);
-  if (!check.ok) throw httpError(400, check.reason);
+  if (!check.ok) throw new HttpError(400, check.reason);
 
   const id = (typeof docId === 'string' && docId) || registry.deriveDocId(body.project, check.path);
   const existing = registry.findDoc(ctx.registry, id);
-  if (existing.kind === 'conflict') {
-    throw httpError(
-      409,
-      `doc id ${JSON.stringify(id)} is registered under multiple projects (${existing.projects.join(
-        ', '
-      )}); the journal is corrupt — refusing to register`
-    );
-  }
+  if (existing.kind === 'conflict') throw conflictError(id, existing.projects);
   if (existing.kind === 'found' && existing.doc.project !== body.project) {
-    throw httpError(
+    throw new HttpError(
       409,
       `doc id ${JSON.stringify(id)} is already registered in project ${JSON.stringify(existing.doc.project)}`
     );
@@ -145,20 +143,13 @@ async function handleRegister(ctx: DaemonContext, req: IncomingMessage, res: Ser
 // bytes become a response — later tickets inject the annotation layer here.
 function handleDoc(ctx: DaemonContext, res: ServerResponse, id: string): void {
   const found = registry.findDoc(ctx.registry, id);
-  if (found.kind === 'conflict') {
-    throw httpError(
-      409,
-      `doc id ${JSON.stringify(id)} is registered under multiple projects (${found.projects.join(
-        ', '
-      )}); the journal is corrupt and margin will not serve an arbitrary entry`
-    );
-  }
-  if (found.kind === 'missing') throw httpError(404, `unknown doc: ${id}`);
+  if (found.kind === 'conflict') throw conflictError(id, found.projects);
+  if (found.kind === 'missing') throw new HttpError(404, `unknown doc: ${id}`);
   let bytes: Buffer;
   try {
     bytes = readFileSync(found.doc.path); // read per request: edits on disk are visible immediately
   } catch {
-    throw httpError(404, `doc file no longer exists: ${found.doc.path}`);
+    throw new HttpError(404, `doc file no longer exists: ${found.doc.path}`);
   }
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
@@ -170,7 +161,7 @@ function handleDoc(ctx: DaemonContext, res: ServerResponse, id: string): void {
 
 async function route(ctx: DaemonContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url, 'http://127.0.0.1');
-  if (!isAuthorized(req, url, ctx.token)) throw httpError(401, 'missing or invalid token');
+  if (!isAuthorized(req, url, ctx.token)) throw new HttpError(401, 'missing or invalid token');
 
   if (req.method === 'GET' && url.pathname === '/healthz') {
     sendJson(res, 200, { ok: true, service: 'margin', version: VERSION, pid: process.pid });
@@ -185,7 +176,7 @@ async function route(ctx: DaemonContext, req: IncomingMessage, res: ServerRespon
     handleDoc(ctx, res, decodeURIComponent(docMatch[1]));
     return;
   }
-  throw httpError(404, 'not found');
+  throw new HttpError(404, 'not found');
 }
 
 export function createDaemon({ home, token }: { home: string; token: string }): { server: Server; ctx: DaemonContext } {

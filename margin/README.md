@@ -67,7 +67,7 @@ State lives in `~/.margin` (override with `MARGIN_HOME`):
   route requires the token (`?t=…` or `Authorization: Bearer …`), because
   annotations are instructions an autonomous agent will act on — without the
   token, any website open in a browser could blind-POST forged feedback.
-  Token generation and verification are quarantined in `src/auth.js`.
+  Token generation and verification are quarantined in `src/auth.ts`.
 - **The token is minted once** on first run and reused across restarts, so
   doc URLs already handed out keep working. The daemon prefers the recorded
   port for the same reason — and if that port is held by a foreign process

@@ -2,6 +2,7 @@
 // throwaway MARGIN_HOME, exactly as an agent's bash tool would. The bin runs
 // the compiled output (ADR-0006) — `npm test` builds before running.
 import { test } from 'node:test';
+import type { TestContext } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -119,10 +120,11 @@ test('open fails cleanly on missing files and non-HTML files', async (t) => {
   assert.match(r.stderr, /not an HTML file/);
 });
 
-test('serve fails loudly when the recorded port is held by a foreign process', async (t) => {
-  const home = daemonHome(t);
-
-  // Occupy a port with a plain (non-margin) HTTP server.
+// Occupies a port with a plain (non-margin) HTTP server and points the
+// state file at it, as if a foreign process had taken the recorded port.
+// (pid is far above any real pid_max, so the cleanup hook's kill is a safe
+// no-op.)
+async function squatRecordedPort(t: TestContext, home: string): Promise<number> {
   const squat: Server = createServer((req, res) => {
     res.writeHead(404);
     res.end();
@@ -135,14 +137,17 @@ test('serve fails loudly when the recorded port is held by a foreign process', a
       })
   );
   const port = squat.address().port;
-
-  // The state file claims a margin daemon lives on that port. (pid is far
-  // above any real pid_max, so the cleanup hook's kill is a safe no-op.)
   writeFileSync(
     join(home, 'daemon.json'),
     JSON.stringify({ v: 1, port, token: 'sq'.repeat(24), pid: 2 ** 30, startedAt: new Date().toISOString() }),
     { mode: 0o600 }
   );
+  return port;
+}
+
+test('serve fails loudly when the recorded port is held by a foreign process', async (t) => {
+  const home = daemonHome(t);
+  const port = await squatRecordedPort(t, home);
 
   // The daemon refuses to silently move ports: previously printed URLs point
   // at the recorded one.
@@ -155,6 +160,22 @@ test('serve fails loudly when the recorded port is held by a foreign process', a
   // The state file is untouched — no silent port switch was recorded.
   assert.equal(readStateFile(home).port, port);
   assert.equal(readStateFile(home).token, 'sq'.repeat(24));
+});
+
+test('serve --ensure surfaces the foreign-port failure instead of a bare timeout', async (t) => {
+  const home = daemonHome(t);
+  const port = await squatRecordedPort(t, home);
+
+  // The spawned daemon exits at startup; ensure reports its reason from the
+  // log rather than failing with the generic start timeout.
+  const r = run(['serve', '--ensure'], { home });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /exited during startup/);
+  assert.match(r.stderr, /not a healthy margin daemon/);
+  assert.match(r.stderr, new RegExp(String(port)));
+
+  // Still no silent port switch.
+  assert.equal(readStateFile(home).port, port);
 });
 
 test('unknown commands and flags are usage errors', async (t) => {

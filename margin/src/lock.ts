@@ -5,6 +5,7 @@
 // broken after STALE_MS.
 import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { ensureHome } from './paths';
 
 const STALE_MS = 30_000;
 
@@ -16,7 +17,7 @@ export async function acquireStartupLock(
   home: string,
   { timeoutMs = 10_000 }: { timeoutMs?: number } = {}
 ): Promise<StartupLock> {
-  mkdirSync(home, { recursive: true, mode: 0o700 });
+  ensureHome(home);
   const dir = join(home, 'daemon.lock');
   const deadline = Date.now() + timeoutMs;
   for (;;) {
