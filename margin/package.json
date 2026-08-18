@@ -1,0 +1,25 @@
+{
+  "name": "margin",
+  "version": "0.1.0",
+  "description": "A local feedback loop between agent-generated HTML docs and coding agents.",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "bin": {
+    "margin": "bin/margin.js"
+  },
+  "files": [
+    "bin",
+    "dist/src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "pretest": "npm run build",
+    "test": "node --test dist/test/*.test.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
