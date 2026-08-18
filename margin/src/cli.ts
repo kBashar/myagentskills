@@ -1,14 +1,11 @@
-'use strict';
-
 // The margin CLI (ADR-0001): the single agent-facing surface, driven through
 // any harness's bash tool. This ticket ships `serve` and `open`; `list`,
 // `locate`, `dismiss`, and `install-skill` arrive with later tickets.
-const { marginHome } = require('./paths');
-const { ensureDaemon } = require('./ensure');
-const { cmdServe } = require('./commands/serve');
-const { cmdOpen } = require('./commands/open');
-
-const VERSION = require('../package.json').version;
+import { marginHome } from './paths';
+import { ensureDaemon } from './ensure';
+import { cmdServe } from './commands/serve';
+import { cmdOpen } from './commands/open';
+import { VERSION } from './version';
 
 const USAGE = `margin ${VERSION} — a local feedback loop between visual docs and coding agents
 
@@ -30,9 +27,19 @@ Environment:
                 daemon.log. One daemon serves all projects (ADR-0003).
 `;
 
-function parseArgs(argv, spec) {
-  const flags = {};
-  const positionals = [];
+interface ArgSpec {
+  booleans: string[];
+  values: string[];
+}
+
+interface ParsedArgs {
+  flags: Record<string, string | true>;
+  positionals: string[];
+}
+
+export function parseArgs(argv: string[], spec: ArgSpec): ParsedArgs {
+  const flags: Record<string, string | true> = {};
+  const positionals: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--') {
@@ -59,7 +66,12 @@ function parseArgs(argv, spec) {
   return { flags, positionals };
 }
 
-async function main(argv) {
+function stringFlag(flags: Record<string, string | true>, name: string): string | null {
+  const v = flags[name];
+  return typeof v === 'string' ? v : null;
+}
+
+export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   switch (cmd) {
     case 'help':
@@ -94,9 +106,9 @@ async function main(argv) {
       if (positionals.length > 1) throw new Error(`unexpected argument: ${positionals[1]}`);
       await cmdOpen(marginHome(), {
         file: positionals[0],
-        docId: flags.doc ?? null,
-        agent: flags.agent ?? null,
-        session: flags.session ?? null,
+        docId: stringFlag(flags, 'doc'),
+        agent: stringFlag(flags, 'agent'),
+        session: stringFlag(flags, 'session'),
       });
       return 0;
     }
@@ -106,5 +118,3 @@ async function main(argv) {
       return 1;
   }
 }
-
-module.exports = { main, parseArgs, USAGE };

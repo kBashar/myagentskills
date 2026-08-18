@@ -1,25 +1,23 @@
-'use strict';
-
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { testDaemon, TEST_TOKEN } = require('./helpers');
-const { request, get, post } = require('../src/http-client');
-const { startDaemon } = require('../src/daemon');
-const journal = require('../src/journal');
+import { test } from 'node:test';
+import * as assert from 'node:assert/strict';
+import { writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { testDaemon, tmpdir } from './helpers';
+import type { HttpResponse } from '../src/http-client';
+import { request, get, post } from '../src/http-client';
+import * as journal from '../src/journal';
 
 const DOC_BYTES = Buffer.from(
   '<!doctype html><html><body><h1>Héllo, margin ✓</h1><p>exact bytes, please</p></body></html>\n'
 );
 
-function writeDoc(home, bytes = DOC_BYTES, name = 'report.html') {
-  const file = path.join(home, name);
-  fs.writeFileSync(file, bytes);
+function writeDoc(home: string, bytes: Buffer = DOC_BYTES, name = 'report.html'): string {
+  const file = join(home, name);
+  writeFileSync(file, bytes);
   return file;
 }
 
-async function registerDoc(d, file, extra = {}) {
+async function registerDoc(d: { port: number; token: string }, file: string, extra: Record<string, unknown> = {}): Promise<HttpResponse> {
   return post(d.port, d.token, '/api/docs', { path: file, project: 'demo', agent: 'pi', session: 'sess-1', ...extra });
 }
 
@@ -103,7 +101,8 @@ test('every registration is journaled with doc id, project, agent, and session',
   const registrations = events.filter((e) => e.type === 'doc.registered');
   assert.equal(registrations.length, 2);
 
-  const [first, second] = registrations;
+  const first = registrations[0] as any;
+  const second = registrations[1] as any;
   assert.equal(first.v, 1);
   assert.equal(typeof first.ts, 'string');
   assert.match(first.doc.id, /^report-[0-9a-f]{6}$/);
@@ -123,7 +122,7 @@ test('the registry is rebuilt from the journal across restarts', async (t) => {
   const reg = JSON.parse((await registerDoc(d, file)).body.toString('utf8'));
   const id = reg.doc.id;
 
-  await new Promise((resolve) => d.server.close(resolve));
+  await new Promise<void>((resolvePromise) => d.server.close(() => resolvePromise()));
 
   // Same home, fresh daemon: the journal is the source of truth.
   const d2 = await testDaemon(t, { token: d.token, home: d.home });
@@ -152,6 +151,33 @@ test('explicit doc ids are honored, validated, and unique across projects', asyn
   assert.equal(res.status, 409);
 });
 
+test('a doc id journaled under two projects is surfaced as a conflict, never silently served', async (t) => {
+  const home = tmpdir(t);
+  const file = writeDoc(home);
+  // Forge a corrupt journal: the same doc id registered under two projects.
+  journal.append(home, { type: 'doc.registered', doc: { id: 'clash', project: 'alpha', path: file, agent: null, session: null } });
+  journal.append(home, { type: 'doc.registered', doc: { id: 'clash', project: 'beta', path: file, agent: null, session: null } });
+
+  const d = await testDaemon(t, { home });
+
+  // Serving the conflicted id is refused loudly — no arbitrary entry wins.
+  const res = await request({ port: d.port, path: `/d/clash?t=${d.token}` });
+  assert.equal(res.status, 409);
+  assert.match(JSON.parse(res.body.toString('utf8')).error, /multiple projects/);
+
+  // Registering over a conflicted id is refused too.
+  const reg = await post(d.port, d.token, '/api/docs', { path: file, project: 'gamma', docId: 'clash' });
+  assert.equal(reg.status, 409);
+
+  // Every other doc is unaffected.
+  const ok = await post(d.port, d.token, '/api/docs', { path: file, project: 'gamma' });
+  assert.equal(ok.status, 200);
+  const id = JSON.parse(ok.body.toString('utf8')).doc.id;
+  const served = await request({ port: d.port, path: `/d/${id}?t=${d.token}` });
+  assert.equal(served.status, 200);
+  assert.deepStrictEqual(served.body, DOC_BYTES);
+});
+
 test('registration validates its input', async (t) => {
   const d = await testDaemon(t);
   const file = writeDoc(d.home);
@@ -162,12 +188,12 @@ test('registration validates its input', async (t) => {
   res = await post(d.port, d.token, '/api/docs', { path: 'relative/report.html', project: 'demo' });
   assert.equal(res.status, 400);
 
-  res = await post(d.port, d.token, '/api/docs', { path: path.join(d.home, 'missing.html'), project: 'demo' });
+  res = await post(d.port, d.token, '/api/docs', { path: join(d.home, 'missing.html'), project: 'demo' });
   assert.equal(res.status, 400);
   assert.match(JSON.parse(res.body.toString('utf8')).error, /no such file/);
 
-  const txt = path.join(d.home, 'notes.txt');
-  fs.writeFileSync(txt, 'plain text');
+  const txt = join(d.home, 'notes.txt');
+  writeFileSync(txt, 'plain text');
   res = await post(d.port, d.token, '/api/docs', { path: txt, project: 'demo' });
   assert.equal(res.status, 400);
   assert.match(JSON.parse(res.body.toString('utf8')).error, /not an HTML file/);
@@ -195,7 +221,7 @@ test('a deleted doc file 404s at serve time but stays registered', async (t) => 
   const d = await testDaemon(t);
   const file = writeDoc(d.home);
   const reg = JSON.parse((await registerDoc(d, file)).body.toString('utf8'));
-  fs.rmSync(file);
+  rmSync(file);
 
   const res = await request({ port: d.port, path: `/d/${reg.doc.id}?t=${d.token}` });
   assert.equal(res.status, 404);

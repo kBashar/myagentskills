@@ -1,19 +1,21 @@
-'use strict';
-
 // End-to-end at the real CLI surface: spawns `bin/margin.js` with a
-// throwaway MARGIN_HOME, exactly as an agent's bash tool would.
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-const { tmpdir, daemonHome } = require('./helpers');
-const { request } = require('../src/http-client');
-const journal = require('../src/journal');
+// throwaway MARGIN_HOME, exactly as an agent's bash tool would. The bin runs
+// the compiled output (ADR-0006) — `npm test` builds before running.
+import { test } from 'node:test';
+import * as assert from 'node:assert/strict';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
+import { tmpdir, daemonHome } from './helpers';
+import { request } from '../src/http-client';
+import * as journal from '../src/journal';
 
-const BIN = path.join(__dirname, '..', 'bin', 'margin.js');
+// Compiled tests live in dist/test/, so the package root is two levels up.
+const BIN = join(__dirname, '..', '..', 'bin', 'margin.js');
 
-function run(args, { home, cwd } = {}) {
+function run(args: string[], { home, cwd }: { home: string; cwd?: string }): { status: number | null; stdout: string; stderr: string } {
   return spawnSync(process.execPath, [BIN, ...args], {
     env: { ...process.env, MARGIN_HOME: home },
     cwd,
@@ -22,8 +24,8 @@ function run(args, { home, cwd } = {}) {
   });
 }
 
-function readStateFile(home) {
-  return JSON.parse(fs.readFileSync(path.join(home, 'daemon.json'), 'utf8'));
+function readStateFile(home: string): { v: number; port: number; token: string; pid: number; startedAt: string } {
+  return JSON.parse(readFileSync(join(home, 'daemon.json'), 'utf8'));
 }
 
 test('serve --ensure twice results in exactly one daemon; the second reports it', async (t) => {
@@ -37,7 +39,7 @@ test('serve --ensure twice results in exactly one daemon; the second reports it'
   assert.ok(s1.port > 0, 'port recorded in the state file');
   assert.ok(typeof s1.token === 'string' && s1.token.length >= 32, 'token recorded in the state file');
   // The state file holds the bearer token: it must not be world-readable.
-  assert.equal(fs.statSync(path.join(home, 'daemon.json')).mode & 0o777, 0o600);
+  assert.equal(statSync(join(home, 'daemon.json')).mode & 0o777, 0o600);
 
   const health = await request({ port: s1.port, path: `/healthz?t=${s1.token}` });
   assert.equal(health.status, 200);
@@ -64,9 +66,9 @@ test('open prints a token-scoped URL that serves the exact bytes', async (t) => 
 
   // A fake git project so project namespacing is exercised.
   const proj = tmpdir(t, 'margin-proj-');
-  fs.mkdirSync(path.join(proj, '.git'));
+  mkdirSync(join(proj, '.git'));
   const fileBytes = Buffer.from('<!doctype html><html><body><h1>Status ✓</h1></body></html>\n');
-  fs.writeFileSync(path.join(proj, 'status report.html'), fileBytes);
+  writeFileSync(join(proj, 'status report.html'), fileBytes);
 
   // No daemon is running: open must ensure it on its own.
   const r = run(['open', 'status report.html', '--agent', 'pi', '--session', 's-42'], { home, cwd: proj });
@@ -87,15 +89,16 @@ test('open prints a token-scoped URL that serves the exact bytes', async (t) => 
   const events = journal.readAll(home);
   const registrations = events.filter((e) => e.type === 'doc.registered');
   assert.equal(registrations.length, 1);
-  assert.equal(registrations[0].doc.project, path.basename(proj));
-  assert.equal(registrations[0].doc.agent, 'pi');
-  assert.equal(registrations[0].doc.session, 's-42');
+  const doc = (registrations[0] as any).doc;
+  assert.equal(doc.project, basename(proj));
+  assert.equal(doc.agent, 'pi');
+  assert.equal(doc.session, 's-42');
 });
 
 test('open --doc uses the explicit doc id in the URL', async (t) => {
   const home = daemonHome(t);
   const proj = tmpdir(t, 'margin-proj-');
-  fs.writeFileSync(path.join(proj, 'a.html'), '<!doctype html><html></html>\n');
+  writeFileSync(join(proj, 'a.html'), '<!doctype html><html></html>\n');
 
   const r = run(['open', 'a.html', '--doc', 'quarterly-review'], { home, cwd: proj });
   assert.equal(r.status, 0, r.stderr);
@@ -105,7 +108,7 @@ test('open --doc uses the explicit doc id in the URL', async (t) => {
 test('open fails cleanly on missing files and non-HTML files', async (t) => {
   const home = tmpdir(t);
   const proj = tmpdir(t, 'margin-proj-');
-  fs.writeFileSync(path.join(proj, 'notes.txt'), 'plain');
+  writeFileSync(join(proj, 'notes.txt'), 'plain');
 
   let r = run(['open', 'missing.html'], { home, cwd: proj });
   assert.equal(r.status, 1);
@@ -114,6 +117,44 @@ test('open fails cleanly on missing files and non-HTML files', async (t) => {
   r = run(['open', 'notes.txt'], { home, cwd: proj });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /not an HTML file/);
+});
+
+test('serve fails loudly when the recorded port is held by a foreign process', async (t) => {
+  const home = daemonHome(t);
+
+  // Occupy a port with a plain (non-margin) HTTP server.
+  const squat: Server = createServer((req, res) => {
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolvePromise) => squat.listen(0, '127.0.0.1', () => resolvePromise()));
+  t.after(
+    () =>
+      new Promise<void>((resolvePromise) => {
+        squat.close(() => resolvePromise());
+      })
+  );
+  const port = squat.address().port;
+
+  // The state file claims a margin daemon lives on that port. (pid is far
+  // above any real pid_max, so the cleanup hook's kill is a safe no-op.)
+  writeFileSync(
+    join(home, 'daemon.json'),
+    JSON.stringify({ v: 1, port, token: 'sq'.repeat(24), pid: 2 ** 30, startedAt: new Date().toISOString() }),
+    { mode: 0o600 }
+  );
+
+  // The daemon refuses to silently move ports: previously printed URLs point
+  // at the recorded one.
+  const r = run(['serve'], { home });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /not a healthy margin daemon/);
+  assert.match(r.stderr, /refuses to silently switch ports/);
+  assert.match(r.stderr, new RegExp(String(port)));
+
+  // The state file is untouched — no silent port switch was recorded.
+  assert.equal(readStateFile(home).port, port);
+  assert.equal(readStateFile(home).token, 'sq'.repeat(24));
 });
 
 test('unknown commands and flags are usage errors', async (t) => {

@@ -12,12 +12,16 @@ throughout the code is defined in `CONTEXT.md`.
 
 ## Requirements
 
-Plain Node (>= 18). Zero runtime dependencies.
+Plain Node (>= 18). Zero runtime dependencies — the source is TypeScript,
+compiled at build time with `typescript` as the sole devDependency
+(ADR-0006); the bin runs the compiled output in `dist/`.
 
 ## Install
 
 ```sh
 cd margin
+npm install     # dev only: fetches typescript
+npm run build   # compiles src/ + test/ to dist/
 npm link        # puts `margin` on your PATH
 # or run it in place: node bin/margin.js …
 ```
@@ -66,8 +70,12 @@ State lives in `~/.margin` (override with `MARGIN_HOME`):
   Token generation and verification are quarantined in `src/auth.js`.
 - **The token is minted once** on first run and reused across restarts, so
   doc URLs already handed out keep working. The daemon prefers the recorded
-  port for the same reason, falling back to a fresh one only if a foreign
-  process has taken it.
+  port for the same reason — and if that port is held by a foreign process
+  it **fails loudly** rather than silently moving ports: every doc URL
+  already printed points at the recorded port, and a quiet switch would
+  strand them all. The error names the port; free it and retry, or remove
+  `daemon.json` to mint a fresh port and token (invalidating previously
+  printed URLs).
 - **The journal is the state.** The doc registry is project-namespaced and
   derived by replaying the journal at startup; the daemon is the only
   process that appends. Crashes never lose registrations.
@@ -86,10 +94,11 @@ State lives in `~/.margin` (override with `MARGIN_HOME`):
 ## Development
 
 ```sh
-npm test
+npm test        # builds (tsc) first, then runs node:test on dist/test/
 ```
 
 Tests drive the daemon through its HTTP interface on an ephemeral port —
 the project's one test seam — and assert on responses and the journal on
 disk. CLI-level tests spawn `bin/margin.js` against a throwaway
-`MARGIN_HOME`.
+`MARGIN_HOME`, exercising the compiled output exactly as an agent's bash
+tool would.
