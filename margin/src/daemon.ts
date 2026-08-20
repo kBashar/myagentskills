@@ -4,8 +4,8 @@
 // through the auth module — nothing here extracts, compares, or embeds
 // tokens itself.
 //
-// Later tickets extend this server at two deliberate seams:
-//   - route(): annotation POST/GET, dismiss, and the per-doc SSE channel;
+// The core loop (issue #3) realized the two deliberate seams below:
+//   - route(): annotation create/list/drain and the per-doc SSE channel;
 //   - handleDoc(): the injected layer (ADR-0002) transforms the pristine
 //     bytes at serve time. The source file on disk is never modified.
 import { createServer } from 'node:http';
@@ -13,8 +13,11 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { isAuthorized, scopedUrl } from './auth';
+import * as annotations from './annotations';
 import * as journal from './journal';
 import * as registry from './registry';
+import { createHub } from './sse';
+import type { SseHub } from './sse';
 import { validateDocFile } from './docfile';
 import { VERSION } from './version';
 
@@ -43,6 +46,8 @@ export interface DaemonContext {
   home: string;
   token: string;
   registry: registry.Registry;
+  annotations: annotations.AnnotationStore;
+  sse: SseHub;
   port: number | null;
 }
 
@@ -50,6 +55,21 @@ function sendJson(res: ServerResponse, status: number, obj: unknown): void {
   const body = Buffer.from(JSON.stringify(obj) + '\n');
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': body.length });
   res.end(body);
+}
+
+// Parses a JSON object request body, rejecting anything else uniformly.
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const raw = await readBody(req);
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    throw new HttpError(400, 'request body must be JSON');
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpError(400, 'request body must be a JSON object');
+  }
+  return body as Record<string, unknown>;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -93,16 +113,7 @@ interface RegisterBody {
 // which is why registration arrives over HTTP rather than the CLI writing
 // files itself.
 async function handleRegister(ctx: DaemonContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const raw = await readBody(req);
-  let body: RegisterBody;
-  try {
-    body = JSON.parse(raw) as RegisterBody;
-  } catch {
-    throw new HttpError(400, 'request body must be JSON');
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'request body must be a JSON object');
-  }
+  const body = (await readJsonBody(req)) as RegisterBody;
   const { docId, agent, session } = body;
   if (typeof body.path !== 'string' || !body.path) throw new HttpError(400, 'missing required field: path');
   if (!isAbsolute(body.path)) throw new HttpError(400, `path must be absolute: ${JSON.stringify(body.path)}`);
@@ -159,6 +170,90 @@ function handleDoc(ctx: DaemonContext, res: ServerResponse, id: string): void {
   res.end(bytes);
 }
 
+// Creating an annotation (CONTEXT.md): the reader's note arrives from the
+// injected layer with quote, ~40 chars of context each side, heading trail,
+// and comment. The daemon stamps the DOC's agent identity (never the body's),
+// journals the create, and starts the note at `unread`.
+async function handleCreateAnnotation(ctx: DaemonContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = await readJsonBody(req);
+  const { docId, quote, prefix, suffix, trail, comment } = body;
+  if (typeof docId !== 'string' || !docId) throw new HttpError(400, 'missing required field: docId');
+  if (typeof quote !== 'string' || !quote.trim()) throw new HttpError(400, 'missing required field: quote');
+  if (typeof comment !== 'string' || !comment.trim()) throw new HttpError(400, 'missing required field: comment');
+  if (prefix != null && typeof prefix !== 'string') throw new HttpError(400, 'prefix must be a string');
+  if (suffix != null && typeof suffix !== 'string') throw new HttpError(400, 'suffix must be a string');
+  if (trail != null && typeof trail !== 'string') throw new HttpError(400, 'trail must be a string');
+
+  const found = registry.findDoc(ctx.registry, docId);
+  if (found.kind === 'conflict') throw conflictError(docId, found.projects);
+  if (found.kind === 'missing') throw new HttpError(404, `unknown doc: ${docId}`);
+
+  const annotation: annotations.Annotation = {
+    id: annotations.mintId(ctx.annotations),
+    docId: found.doc.id,
+    project: found.doc.project,
+    agent: found.doc.agent,
+    session: found.doc.session,
+    quote,
+    prefix: typeof prefix === 'string' ? prefix : '',
+    suffix: typeof suffix === 'string' ? suffix : '',
+    trail: typeof trail === 'string' ? trail : '',
+    comment,
+    status: 'unread',
+    ts: new Date().toISOString(),
+  };
+  journal.append(ctx.home, { type: 'annotation.created', annotation });
+  annotations.add(ctx.annotations, annotation);
+  ctx.sse.publish(annotation.docId, 'annotation.created', annotation);
+  sendJson(res, 200, { ok: true, annotation });
+}
+
+// Passive views (ADR-0005): listing annotations NEVER mutates state. The
+// drain is a separate, explicit endpoint — see handleDrain.
+function handleListAnnotations(ctx: DaemonContext, url: URL, res: ServerResponse): void {
+  const status = url.searchParams.get('status');
+  if (status != null && status !== 'unread' && status !== 'read') {
+    throw new HttpError(400, `invalid status filter: ${JSON.stringify(status)} (expected unread|read)`);
+  }
+  const docId = url.searchParams.get('doc');
+  const out = annotations.list(ctx.annotations, {
+    status: status === 'unread' || status === 'read' ? status : undefined,
+    docId: docId ?? undefined,
+  });
+  sendJson(res, 200, { annotations: out });
+}
+
+// The drain (CONTEXT.md): an agent reading the un-read annotations, which
+// marks them `read` — "an agent has seen this", nothing more (ADR-0005).
+// Every flip is journaled BEFORE the response goes out, so a crash after the
+// drain still shows the annotations as read (never silently re-unread).
+async function handleDrain(ctx: DaemonContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  await readBody(req); // no parameters today; consume the body for cleanliness
+  const unread = annotations.list(ctx.annotations, { status: 'unread' });
+  for (const a of unread) {
+    journal.append(ctx.home, { type: 'annotation.read', id: a.id });
+    annotations.markRead(ctx.annotations, a.id);
+    ctx.sse.publish(a.docId, 'annotation.read', { id: a.id, status: 'read' });
+  }
+  sendJson(res, 200, { annotations: unread });
+}
+
+// The per-doc SSE channel: open pages subscribe here; status changes push
+// the moment they happen. The token arrives as ?t=… — a browser EventSource
+// cannot set headers (the auth module's scopedUrl contract exists for this).
+function handleEvents(ctx: DaemonContext, res: ServerResponse, id: string): void {
+  const found = registry.findDoc(ctx.registry, id);
+  if (found.kind === 'conflict') throw conflictError(id, found.projects);
+  if (found.kind === 'missing') throw new HttpError(404, `unknown doc: ${id}`);
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  });
+  res.write('retry: 3000\n\n');
+  ctx.sse.subscribe(id, res);
+}
+
 async function route(ctx: DaemonContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url, 'http://127.0.0.1');
   if (!isAuthorized(req, url, ctx.token)) throw new HttpError(401, 'missing or invalid token');
@@ -171,6 +266,23 @@ async function route(ctx: DaemonContext, req: IncomingMessage, res: ServerRespon
     await handleRegister(ctx, req, res);
     return;
   }
+  if (req.method === 'POST' && url.pathname === '/api/annotations') {
+    await handleCreateAnnotation(ctx, req, res);
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/api/annotations') {
+    handleListAnnotations(ctx, url, res);
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/annotations/drain') {
+    await handleDrain(ctx, req, res);
+    return;
+  }
+  const eventsMatch = /^\/d\/([^/]+)\/events$/.exec(url.pathname);
+  if (eventsMatch && req.method === 'GET') {
+    handleEvents(ctx, res, decodeURIComponent(eventsMatch[1]));
+    return;
+  }
   const docMatch = /^\/d\/([^/]+)$/.exec(url.pathname);
   if (docMatch && req.method === 'GET') {
     handleDoc(ctx, res, decodeURIComponent(docMatch[1]));
@@ -181,6 +293,7 @@ async function route(ctx: DaemonContext, req: IncomingMessage, res: ServerRespon
 
 export function createDaemon({ home, token }: { home: string; token: string }): { server: Server; ctx: DaemonContext } {
   const reg = registry.load(home);
+  const store = annotations.load(home);
   const conflictIds = Object.keys(reg.conflicts);
   if (conflictIds.length > 0) {
     console.error(
@@ -188,7 +301,7 @@ export function createDaemon({ home, token }: { home: string; token: string }): 
         `refusing to serve them (see ${journal.journalFile(home)})`
     );
   }
-  const ctx: DaemonContext = { home, token, registry: reg, port: null };
+  const ctx: DaemonContext = { home, token, registry: reg, annotations: store, sse: createHub(), port: null };
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     route(ctx, req, res).catch((err: unknown) => {
       const status = err instanceof HttpError ? err.status : 500;
@@ -197,6 +310,7 @@ export function createDaemon({ home, token }: { home: string; token: string }): 
       if (!res.writableEnded) res.end();
     });
   });
+  server.on('close', () => ctx.sse.closeAll());
   return { server, ctx };
 }
 

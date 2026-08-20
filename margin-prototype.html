@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>margin — annotation layer (PROTOTYPE)</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✍️</text></svg>">
+<style>
+  :root{
+    --paper:#f6f4ec; --card:#fffdf6; --ink:#22271f; --ink2:#5c6152;
+    --line:#dbd6c2; --accent:#1d4ed8; --accent-wash:rgba(29,78,216,.12);
+    --ok:#1a7f4b; --ok-wash:rgba(26,127,75,.10); --warn:#b45309; --bad:#b3261e;
+    --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; color:var(--ink); font:15px/1.6 var(--sans);
+    background:var(--paper);
+    background-image:linear-gradient(rgba(90,100,70,.07) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(90,100,70,.07) 1px,transparent 1px);
+    background-size:28px 28px;
+  }
+  .ribbon{
+    position:fixed; top:12px; right:12px; z-index:60;
+    font:600 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase;
+    color:var(--warn); background:#fdf3e3; border:1px solid #ecd9b0;
+    padding:6px 8px; border-radius:3px;
+  }
+  /* ---------- intro ---------- */
+  .intro{max-width:880px; margin:0 auto; padding:40px 24px 8px}
+  .intro h1{font:700 22px/1.2 var(--mono); margin:0 0 4px}
+  .intro h1 span{color:var(--accent)}
+  .intro .q{font-size:14px; color:var(--ink2); max-width:70ch}
+  .try{
+    margin-top:14px; background:var(--card); border:1px solid var(--line);
+    border-radius:3px; padding:12px 16px; font-size:13px;
+  }
+  .try b{font:700 11px var(--mono); text-transform:uppercase; letter-spacing:.1em; color:var(--accent)}
+  .try ol{margin:8px 0 0; padding-left:20px}
+  .try li{margin:2px 0}
+  kbd{font:600 11px var(--mono); background:#efecdd; border:1px solid var(--line); border-radius:3px; padding:1px 5px}
+  .toolbar{display:flex; gap:8px; flex-wrap:wrap; margin-top:14px}
+  .btn{
+    font:600 12px var(--mono); color:var(--ink); background:var(--card);
+    border:1px solid var(--line); border-radius:3px; padding:7px 12px; cursor:pointer;
+  }
+  .btn:hover{border-color:var(--accent); color:var(--accent)}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  /* ---------- doc ---------- */
+  .stage{max-width:880px; margin:0 auto; padding:8px 24px 140px}
+  .doc-wrap{position:relative; transition:padding .15s}
+  body[data-variant="a"] .doc-wrap{padding-right:350px}
+  article#doc{
+    background:var(--card); border:1px solid var(--line); border-radius:3px;
+    padding:36px 40px; max-width:68ch;
+  }
+  #doc .meta{
+    font:600 10px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink2);
+    border-bottom:1px solid var(--line); padding-bottom:10px; margin-bottom:22px;
+    display:flex; gap:14px; flex-wrap:wrap;
+  }
+  #doc .meta b{color:var(--accent)}
+  #doc h1{font:700 20px var(--mono); margin:0 0 18px}
+  #doc section{margin:0 0 26px}
+  #doc h2{font:700 13px var(--mono); text-transform:uppercase; letter-spacing:.08em;
+    border-bottom:1px solid var(--line); padding-bottom:6px; margin:0 0 12px}
+  #doc h2 .no{color:var(--accent); margin-right:8px}
+  #doc p{margin:0 0 12px; max-width:62ch}
+  #doc code{font:600 12.5px var(--mono); background:#efecdd; padding:1px 5px; border-radius:3px}
+  #doc p.edited{animation:editedFlash 1.6s ease-out}
+  @keyframes editedFlash{0%{background:rgba(180,83,9,.18)}100%{background:transparent}}
+  /* ---------- highlights ---------- */
+  .mhl{background:var(--accent-wash); border-bottom:1px solid rgba(29,78,216,.5); cursor:pointer}
+  .mhl.st-resolved{background:var(--ok-wash); border-bottom-color:rgba(26,127,75,.4)}
+  .mhl.st-read{background:rgba(90,100,70,.10); border-bottom-color:rgba(90,100,70,.35)}
+  body[data-variant="b"] .mhl{background:transparent; border-bottom:2px dotted var(--accent)}
+  body[data-variant="b"] .mhl.st-resolved{border-bottom-color:var(--ok)}
+  body[data-variant="b"] .mhl.st-read{border-bottom-color:#9a9d8a}
+  .mhl.flash{outline:2px solid var(--accent); outline-offset:1px}
+  sup.mmark{font:700 10px var(--mono); color:var(--accent); margin-left:2px; cursor:pointer}
+  sup.mmark.st-resolved{color:var(--ok)}
+  sup.mmark.st-read{color:#9a9d8a}
+  /* ---------- thread cards (shared by A gutter / B drawer / C end panel) ---------- */
+  .tcard{
+    background:var(--card); border:1px solid var(--line); border-radius:3px;
+    padding:10px 12px; font-size:13px; margin-bottom:10px;
+  }
+  .tcard.lost{border-style:dashed; border-color:var(--bad)}
+  .tcard .q{
+    font:11px/1.5 var(--mono); color:var(--ink2); border-left:2px solid var(--accent);
+    padding-left:8px; margin-bottom:8px;
+    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+  }
+  .tcard.lost .q{border-left-color:var(--bad); text-decoration:line-through}
+  .tcard .c{margin-bottom:8px}
+  .chips{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px}
+  .chip{font:700 9px var(--mono); letter-spacing:.08em; text-transform:uppercase;
+    padding:3px 6px; border-radius:3px; border:1px solid transparent}
+  .chip.unread{color:var(--accent); background:var(--accent-wash); border-color:rgba(29,78,216,.3)}
+  .chip.read{color:var(--ink2); background:rgba(90,100,70,.08); border-color:var(--line)}
+  .chip.resolved{color:var(--ok); background:var(--ok-wash); border-color:rgba(26,127,75,.3)}
+  .chip.loc-exact{color:var(--ink2); border-color:var(--line)}
+  .chip.loc-normalized,.chip.loc-partial{color:var(--warn); background:#fdf3e3; border-color:#ecd9b0}
+  .chip.loc-lost{color:var(--bad); background:#fbeae8; border-color:#efc5c1}
+  .trail{font:600 9.5px var(--mono); color:var(--ink2); text-transform:uppercase; letter-spacing:.06em}
+  .reply{border-top:1px dashed var(--line); padding:6px 0 0; margin-top:6px}
+  .reply .by{font:700 9.5px var(--mono); color:var(--accent); text-transform:uppercase; letter-spacing:.06em}
+  .reply .by.you{color:var(--ink2)}
+  .rinput{display:flex; gap:6px; margin-top:8px}
+  .rinput input{
+    flex:1; font:12px var(--sans); padding:5px 8px; border:1px solid var(--line);
+    border-radius:3px; background:#fff;
+  }
+  .rinput button{font:600 11px var(--mono); border:1px solid var(--line); background:#efecdd;
+    border-radius:3px; padding:4px 8px; cursor:pointer}
+  .t-actions{display:flex; gap:10px; margin-top:8px}
+  .t-actions button{font:600 10px var(--mono); text-transform:uppercase; letter-spacing:.06em;
+    color:var(--ink2); background:none; border:none; cursor:pointer; padding:0}
+  .t-actions button:hover{color:var(--accent)}
+  /* variant A gutter */
+  #gutter{display:none}
+  body[data-variant="a"] #gutter{display:block; position:absolute; right:0; top:36px; width:320px}
+  body[data-variant="a"] #gutter .tcard{position:absolute; width:320px}
+  /* variant B drawer */
+  #drawer{
+    display:none; position:fixed; top:0; right:0; bottom:0; width:340px; z-index:40;
+    background:var(--paper); border-left:1px solid var(--line); padding:16px; overflow-y:auto;
+  }
+  body[data-variant="b"] #drawer{display:block}
+  #drawer h3, #annot-end h3{font:700 11px var(--mono); text-transform:uppercase; letter-spacing:.1em;
+    color:var(--ink2); margin:0 0 12px}
+  /* variant C end-of-doc annotations */
+  #annot-end{display:none; max-width:68ch; margin-top:24px}
+  body[data-variant="c"] #annot-end{display:block}
+  /* ---------- composer ---------- */
+  #composer{
+    position:fixed; z-index:50; width:320px; background:var(--card);
+    border:1px solid var(--accent); border-radius:3px; padding:10px 12px;
+    box-shadow:0 8px 24px rgba(30,35,20,.18);
+  }
+  #composer .q{font:10.5px/1.4 var(--mono); color:var(--ink2); border-left:2px solid var(--accent);
+    padding-left:8px; margin-bottom:8px; max-height:54px; overflow:hidden}
+  #composer textarea{
+    width:100%; font:13px var(--sans); border:1px solid var(--line); border-radius:3px;
+    padding:6px 8px; resize:vertical; min-height:54px; background:#fff;
+  }
+  #composer .row{display:flex; gap:8px; justify-content:flex-end; margin-top:8px}
+  /* ---------- inspector / toast / switcher ---------- */
+  #inspector{
+    display:none; position:fixed; right:12px; bottom:64px; z-index:55; width:380px;
+    max-height:52vh; overflow:auto; background:#1c211a; color:#cfe3c8;
+    border-radius:3px; padding:12px 14px; font:10.5px/1.5 var(--mono);
+  }
+  #inspector h4{margin:0 0 8px; font:700 10px var(--mono); text-transform:uppercase;
+    letter-spacing:.1em; color:#8fae82}
+  #inspector pre{margin:0; white-space:pre-wrap; word-break:break-word}
+  #toast{
+    position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:70;
+    background:#1c211a; color:#e8ecdd; font:600 12px var(--mono);
+    padding:8px 14px; border-radius:3px; opacity:0; transition:opacity .2s; pointer-events:none;
+  }
+  #toast.on{opacity:1}
+  .switcher{
+    position:fixed; bottom:14px; left:50%; transform:translateX(-50%); z-index:60;
+    display:flex; align-items:center; gap:12px;
+    background:#1c211a; color:#e8ecdd; border-radius:999px; padding:6px 8px;
+    font:600 12px var(--mono); box-shadow:0 6px 20px rgba(30,35,20,.3);
+  }
+  .switcher button{
+    background:none; border:1px solid #4a5442; color:#e8ecdd; border-radius:999px;
+    width:28px; height:28px; cursor:pointer; font:600 14px var(--mono);
+  }
+  .switcher button:hover{border-color:var(--accent); color:#9db8ff}
+  .switcher .vlabel{min-width:210px; text-align:center}
+  .switcher .vlabel b{color:#9db8ff}
+</style>
+</head>
+<body data-variant="a">
+
+<div class="ribbon">PROTOTYPE — throwaway</div>
+
+<header class="intro">
+  <h1><span>margin</span> — annotation layer for visual docs</h1>
+  <p class="q"><b>Question:</b> does the review loop feel right — select a passage, comment, the agent
+  replies or edits the doc, and your annotations re-anchor instead of breaking? Variants
+  <b>A / B / C</b> explore three ways to display threads. Everything is in-memory; nothing leaves this page.</p>
+  <div class="try">
+    <b>Try this</b>
+    <ol>
+      <li><b>Select any text</b> in the doc below → a composer appears → save a note.</li>
+      <li>Open the <b>state inspector</b> to see the payload that would be POSTed to the daemon.</li>
+      <li>Press <b>Simulate agent reply</b> — watch statuses flip <i>unread → read</i>.</li>
+      <li>Annotate a sentence in <b>§2 Anchoring</b>, then press <b>Simulate agent edit</b> — the paragraph gets rewritten. Watch your annotation re-anchor (<i>exact / partial / lost</i>).</li>
+      <li>Flip variants with <kbd>←</kbd> <kbd>→</kbd> — gutter vs drawer vs footnotes.</li>
+    </ol>
+  </div>
+  <div class="toolbar">
+    <button class="btn primary" id="btn-reply">💬 Simulate agent reply</button>
+    <button class="btn" id="btn-edit">✏️ Simulate agent edit (rewrites §2)</button>
+    <button class="btn" id="btn-inspector">⎘ State inspector</button>
+    <button class="btn" id="btn-reset">↺ Reset</button>
+  </div>
+</header>
+
+<div class="stage">
+  <div class="doc-wrap">
+    <article id="doc">
+      <div class="meta">
+        <span>DOC <b>margin/arch</b></span>
+        <span>AGENT <b>pi</b></span>
+        <span>SESSION <b>sess-4f2a</b></span>
+        <span id="rev">REV <b>1</b></span>
+      </div>
+      <h1>margin — a local feedback loop for visual docs</h1>
+      <section data-trail="Transport">
+        <h2><span class="no">01</span>Transport — daemon &amp; queue</h2>
+        <p>A tiny localhost daemon owns the queue. Docs POST annotations to it; agents drain it with the
+        same CLI everywhere — margin list, margin reply, margin resolve. No harness-specific code lives
+        in the doc itself.</p>
+        <p>The daemon writes every event to a JSONL journal under <code>~/.margin</code>, so a crashed
+        session can recover pending feedback without a second process.</p>
+      </section>
+      <section data-trail="Anchoring">
+        <h2><span class="no">02</span>Anchoring — fuzzy, not fixed</h2>
+        <p id="anchor-p1">The injected layer captures the exact quote, forty characters of context on each
+        side, and the heading trail above the selection. Nothing is stored as a position — every anchor is
+        resolved lazily against the file as it exists right now.</p>
+        <p><code>margin locate</code> re-parses the current HTML and returns a line range plus a
+        confidence: exact, normalized, partial, or lost. Low confidence means the agent asks before editing.</p>
+      </section>
+      <section data-trail="Status &amp; replies">
+        <h2><span class="no">03</span>Status &amp; replies</h2>
+        <p>Annotations carry a status — unread, read, resolved — so the page can tell you whether the agent
+        has seen your note. Replies land in the same thread, and the page live-reloads over SSE when the
+        agent edits the file.</p>
+      </section>
+    </article>
+    <aside id="gutter"></aside>
+    <section id="annot-end">
+      <h3>Annotations</h3>
+      <div id="annot-end-list"></div>
+    </section>
+  </div>
+</div>
+
+<aside id="drawer">
+  <h3>Threads</h3>
+  <div id="drawer-list"></div>
+</aside>
+
+<div id="composer" hidden>
+  <div class="q"></div>
+  <textarea placeholder="Comment or question on this passage…"></textarea>
+  <div class="row">
+    <button class="btn" id="c-cancel">Cancel</button>
+    <button class="btn primary" id="c-save">Save note</button>
+  </div>
+</div>
+
+<div id="inspector"><h4>margin — state</h4><pre id="inspector-pre"></pre></div>
+<div id="toast"></div>
+
+<div class="switcher">
+  <button id="v-prev" title="Previous variant">←</button>
+  <span class="vlabel" id="v-label"></span>
+  <button id="v-next" title="Next variant">→</button>
+</div>
+
+<script>
+/* ============================================================
+   MarginCore — the liftable part. Pure logic, no DOM.
+   The page below is a throwaway shell; this module is the
+   candidate to carry into the real daemon/injected layer.
+   ============================================================ */
+const MarginCore = (() => {
+
+  function createState() {
+    return { docId: 'margin/arch', agent: 'pi', session: 'sess-4f2a',
+             annotations: [], seq: 0, lastPayload: null };
+  }
+
+  function addAnnotation(state, { quote, prefix, suffix, trail, comment }) {
+    const a = { id: 'a' + (++state.seq), quote, prefix, suffix, trail,
+                comment, status: 'unread', replies: [], ts: Date.now() };
+    state.annotations.push(a);
+    state.lastPayload = {
+      op: 'POST', url: `/docs/${state.docId}/annotations`,
+      body: { doc: state.docId, agent: state.agent, session: state.session,
+              quote, prefix, suffix, trail, comment, status: 'unread' },
+    };
+    return a;
+  }
+
+  function addReply(state, id, by, text) {
+    const a = state.annotations.find(x => x.id === id);
+    if (!a) return null;
+    a.replies.push({ by, text, ts: Date.now() });
+    if (by === 'agent') a.status = 'read';          // agent answered → user has been heard
+    else a.status = 'unread';                        // user replied → agent must look again
+    return a;
+  }
+
+  function setStatus(state, id, status) {
+    const a = state.annotations.find(x => x.id === id);
+    if (a) a.status = status;
+  }
+
+  /* --- anchor resolution against CURRENT doc text --- */
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const wordRe = s => s.trim().split(/\s+/).map(esc).join('\\s+');
+
+  function allIndices(text, q) {
+    const out = []; let i = text.indexOf(q);
+    while (i !== -1) { out.push(i); i = text.indexOf(q, i + 1); }
+    return out;
+  }
+  function ctxScore(text, a, i) {
+    let score = 0;
+    const pre = text.slice(Math.max(0, i - a.prefix.length), i);
+    for (let k = 1; k <= a.prefix.length; k++)
+      if (pre.endsWith(a.prefix.slice(-k))) score = k; else break;
+    const suf = text.slice(i + a.quote.length, i + a.quote.length + a.suffix.length);
+    for (let k = 1; k <= a.suffix.length; k++)
+      if (suf.startsWith(a.suffix.slice(0, k))) score += k; else break;
+    return score;
+  }
+
+  /* returns { status:'exact'|'normalized'|'partial'|'lost', index, length } */
+  function locate(text, a) {
+    const hits = allIndices(text, a.quote);
+    if (hits.length) {
+      const best = hits.reduce((b, i) => ctxScore(text, a, i) > ctxScore(text, a, b) ? i : b, hits[0]);
+      return { status: 'exact', index: best, length: a.quote.length };
+    }
+    const nm = text.match(new RegExp(wordRe(a.quote)));
+    if (nm) return { status: 'normalized', index: nm.index, length: nm[0].length };
+    const w = a.quote.trim().split(/\s+/);
+    if (w.length >= 6) {
+      const head = new RegExp(w.slice(0, 4).map(esc).join('\\s+'));
+      const tail = new RegExp(w.slice(-4).map(esc).join('\\s+'));
+      const hm = text.match(head), tm = text.match(tail);
+      if (hm && tm && tm.index > hm.index &&
+          (tm.index + tm[0].length) - hm.index < a.quote.length * 3) {
+        return { status: 'partial', index: hm.index,
+                 length: (tm.index + tm[0].length) - hm.index };
+      }
+    }
+    return { status: 'lost', index: -1, length: 0 };
+  }
+
+  return { createState, addAnnotation, addReply, setStatus, locate };
+})();
+</script>
+
+<script>
+/* ============================================================
+   Page shell — THROWAWAY. Wires MarginCore to the DOM,
+   renders three display variants, simulates the agent side.
+   ============================================================ */
+const doc = document.getElementById('doc');
+const gutter = document.getElementById('gutter');
+const drawerList = document.getElementById('drawer-list');
+const endList = document.getElementById('annot-end-list');
+const composer = document.getElementById('composer');
+const inspector = document.getElementById('inspector');
+const toastEl = document.getElementById('toast');
+
+const VARIANTS = {
+  a: 'A — Margin gutter',
+  b: 'B — Underlines + drawer',
+  c: 'C — Footnote panel',
+};
+let state = MarginCore.createState();
+let locById = {};      // annotationId -> locate() result (page-side, recomputed each render)
+let pending = null;    // selection info while composer is open
+let rev = 1;
+
+/* ---------- text utilities over #doc ---------- */
+function textNodes() {
+  const out = []; const w = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+  let n; while ((n = w.nextNode())) out.push(n);
+  return out;
+}
+function docText() { return textNodes().map(n => n.nodeValue).join(''); }
+function absoluteOffset(node, off) {
+  let s = 0;
+  for (const n of textNodes()) { if (n === node) return s + off; s += n.nodeValue.length; }
+  return s;
+}
+function unwrap() {
+  doc.querySelectorAll('span.mhl').forEach(sp => sp.replaceWith(document.createTextNode(sp.textContent)));
+  doc.normalize();
+}
+function wrapPiecewise(start, end, a) {
+  let pos = 0;
+  for (const n of textNodes()) {
+    const s = pos, e = pos + n.nodeValue.length; pos = e;
+    const lo = Math.max(start, s), hi = Math.min(end, e);
+    if (lo >= hi) continue;
+    const r = document.createRange();
+    r.setStart(n, lo - s); r.setEnd(n, hi - s);
+    const span = document.createElement('span');
+    span.className = 'mhl st-' + a.status; span.dataset.id = a.id;
+    span.addEventListener('click', () => flashCard(a.id));
+    r.surroundContents(span);
+  }
+}
+
+/* ---------- highlight + locate ---------- */
+function highlightAll() {
+  unwrap();
+  const full = docText();
+  locById = {};
+  for (const a of state.annotations) {
+    const loc = MarginCore.locate(full, a);
+    locById[a.id] = loc;
+    if (loc.status !== 'lost') wrapPiecewise(loc.index, loc.index + loc.length, a);
+  }
+}
+function orderedAnnotations() {
+  return [...state.annotations].sort((x, y) => {
+    const lx = locById[x.id], ly = locById[y.id];
+    const ix = lx && lx.status !== 'lost' ? lx.index : Infinity;
+    const iy = ly && ly.status !== 'lost' ? ly.index : Infinity;
+    return ix - iy;
+  });
+}
+
+/* ---------- thread card (shared by all variants) ---------- */
+function threadCard(a, num) {
+  const loc = locById[a.id] || { status: 'lost' };
+  const el = document.createElement('div');
+  el.className = 'tcard' + (loc.status === 'lost' ? ' lost' : '');
+  el.dataset.id = a.id;
+  el.innerHTML = `
+    ${num ? `<div class="trail">[${num}] ${a.trail || ''}</div>` : `<div class="trail">${a.trail || ''}</div>`}
+    <div class="q">“${a.quote}”</div>
+    <div class="c"></div>
+    <div class="chips">
+      <span class="chip ${a.status}">${a.status}</span>
+      <span class="chip loc-${loc.status}">anchor: ${loc.status}</span>
+    </div>
+    <div class="replies"></div>
+    <div class="rinput"><input placeholder="Reply in thread…" ><button>↵</button></div>
+    <div class="t-actions">
+      ${a.status !== 'resolved' ? '<button data-act="resolve">resolve</button>' : '<button data-act="reopen">reopen</button>'}
+      <button data-act="flash">show in doc</button>
+    </div>`;
+  el.querySelector('.c').textContent = a.comment;
+  const reps = el.querySelector('.replies');
+  for (const r of a.replies) {
+    const d = document.createElement('div');
+    d.className = 'reply';
+    d.innerHTML = `<span class="by ${r.by === 'you' ? 'you' : ''}">${r.by === 'you' ? 'you' : state.agent + ' · ' + state.session}</span> `;
+    d.appendChild(document.createTextNode(r.text));
+    reps.appendChild(d);
+  }
+  const send = () => {
+    const v = el.querySelector('input').value.trim();
+    if (!v) return;
+    MarginCore.addReply(state, a.id, 'you', v);
+    toast(`Reply queued → annotation ${a.id} is unread again`);
+    renderAll();
+  };
+  el.querySelector('.rinput button').addEventListener('click', send);
+  el.querySelector('.rinput input').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  el.querySelector('[data-act="flash"]').addEventListener('click', () => flashAnchor(a.id));
+  const ra = el.querySelector('[data-act="resolve"], [data-act="reopen"]');
+  if (ra) ra.addEventListener('click', () => {
+    MarginCore.setStatus(state, a.id, a.status === 'resolved' ? 'unread' : 'resolved');
+    renderAll();
+  });
+  return el;
+}
+function flashAnchor(id) {
+  const sp = doc.querySelector(`span.mhl[data-id="${id}"]`);
+  if (!sp) { toast('Anchor is lost — nothing to show'); return; }
+  sp.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  sp.classList.add('flash'); setTimeout(() => sp.classList.remove('flash'), 900);
+}
+function flashCard(id) {
+  const c = document.querySelector(`.tcard[data-id="${id}"]`);
+  if (c) { c.style.outline = '2px solid var(--accent)'; setTimeout(() => c.style.outline = '', 700); }
+}
+
+/* ---------- per-variant rendering ---------- */
+function renderVariant() {
+  gutter.innerHTML = ''; drawerList.innerHTML = ''; endList.innerHTML = '';
+  const ordered = orderedAnnotations();
+  if (document.body.dataset.variant === 'a') {
+    let minTop = 0;
+    const wrapRect = doc.parentElement.getBoundingClientRect();
+    for (const a of ordered) {
+      const card = threadCard(a);
+      const loc = locById[a.id];
+      let top = 0;
+      const sp = doc.querySelector(`span.mhl[data-id="${a.id}"]`);
+      if (sp) top = sp.getBoundingClientRect().top - wrapRect.top;
+      top = Math.max(top, minTop);
+      card.style.top = top + 'px';
+      gutter.appendChild(card);
+      minTop = top + card.offsetHeight + 10;
+    }
+  } else if (document.body.dataset.variant === 'b') {
+    for (const a of ordered) drawerList.appendChild(threadCard(a));
+    if (!ordered.length) drawerList.innerHTML = '<p style="color:var(--ink2);font-size:13px">No threads yet — select text in the doc.</p>';
+  } else {
+    ordered.forEach((a, i) => endList.appendChild(threadCard(a, i + 1)));
+    if (!ordered.length) endList.innerHTML = '<p style="color:var(--ink2);font-size:13px">None yet.</p>';
+  }
+  // variant C: numbered markers at anchor end
+  if (document.body.dataset.variant === 'c') {
+    ordered.forEach((a, i) => {
+      const spans = doc.querySelectorAll(`span.mhl[data-id="${a.id}"]`);
+      const last = spans[spans.length - 1];
+      if (last) {
+        const m = document.createElement('sup');
+        m.className = 'mmark st-' + a.status; m.textContent = `[${i + 1}]`;
+        m.addEventListener('click', () => flashCard(a.id));
+        last.appendChild(m);
+      }
+    });
+  }
+}
+
+/* ---------- inspector ---------- */
+function renderInspector() {
+  const lines = state.annotations.map(a => ({
+    id: a.id, quote: a.quote.length > 34 ? a.quote.slice(0, 34) + '…' : a.quote,
+    status: a.status, anchor: (locById[a.id] || {}).status || '?',
+    replies: a.replies.length, trail: a.trail,
+  }));
+  document.getElementById('inspector-pre').textContent =
+    'annotations\n' + JSON.stringify(lines, null, 1) +
+    '\n\nlast payload → daemon\n' + JSON.stringify(state.lastPayload, null, 1);
+}
+
+/* ---------- master render ---------- */
+function renderAll() { highlightAll(); renderVariant(); renderInspector(); }
+
+/* ---------- selection → composer ---------- */
+function selectionInfo() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  if (!doc.contains(range.commonAncestorContainer)) return null;
+  const quote = sel.toString();
+  if (!quote.trim()) return null;
+  const startNode = range.startContainer.nodeType === 3 ? range.startContainer : null;
+  if (!startNode) return null;
+  const abs = absoluteOffset(startNode, range.startOffset);
+  const full = docText();
+  const trailEl = startNode.parentElement.closest('[data-trail]');
+  return {
+    quote, abs,
+    prefix: full.slice(Math.max(0, abs - 40), abs),
+    suffix: full.slice(abs + quote.length, abs + quote.length + 40),
+    trail: trailEl ? trailEl.dataset.trail : '',
+    rect: range.getBoundingClientRect(),
+  };
+}
+document.addEventListener('mouseup', e => {
+  if (!composer.hidden && composer.contains(e.target)) return;
+  setTimeout(() => {
+    const info = selectionInfo();
+    if (!info) { composer.hidden = true; return; }
+    pending = info;
+    composer.querySelector('.q').textContent = '“' + info.quote.slice(0, 90) + (info.quote.length > 90 ? '…' : '') + '”';
+    composer.querySelector('textarea').value = '';
+    composer.hidden = false;
+    const v = document.body.dataset.variant;
+    if (v === 'a') {
+      const docRight = doc.getBoundingClientRect().right;
+      composer.style.left = Math.min(docRight + 16, innerWidth - 340) + 'px';
+      composer.style.top = Math.max(70, Math.min(info.rect.top, innerHeight - 220)) + 'px';
+      composer.style.bottom = 'auto';
+    } else if (v === 'b') {
+      composer.style.left = Math.min(info.rect.left, innerWidth - 700) + 'px';
+      composer.style.top = Math.min(info.rect.bottom + 8, innerHeight - 220) + 'px';
+      composer.style.bottom = 'auto';
+    } else {
+      composer.style.left = '50%'; composer.style.transform = 'translateX(-50%)';
+      composer.style.top = 'auto'; composer.style.bottom = '64px';
+    }
+    if (v !== 'c') composer.style.transform = '';
+    composer.querySelector('textarea').focus();
+  }, 10);
+});
+document.getElementById('c-cancel').addEventListener('click', () => { composer.hidden = true; });
+document.getElementById('c-save').addEventListener('click', () => {
+  const comment = composer.querySelector('textarea').value.trim();
+  if (!comment || !pending) { composer.hidden = true; return; }
+  MarginCore.addAnnotation(state, pending);
+  composer.hidden = true;
+  window.getSelection().removeAllRanges();
+  toast('Annotation queued → POST /docs/margin/arch/annotations');
+  renderAll();
+});
+
+/* ---------- agent-side simulation ---------- */
+document.getElementById('btn-reply').addEventListener('click', () => {
+  const target = state.annotations.find(a => a.status === 'unread') ||
+                 state.annotations.find(a => a.status !== 'resolved');
+  if (!target) { toast('No open annotations'); return; }
+  MarginCore.addReply(state, target.id, 'agent',
+    'Good catch. I\'ll fold this into the next revision of the doc — anything else on this passage?');
+  toast(`Agent replied on ${target.id} → status: read`);
+  renderAll();
+});
+const P1_V1 = document.getElementById('anchor-p1').innerHTML;
+const P1_V2 = `On selection, the layer records the highlighted words together with their surrounding
+context and the section headings above them. Character positions are never persisted; resolution
+happens on demand, against the file as it currently exists.`;
+document.getElementById('btn-edit').addEventListener('click', () => {
+  const p = document.getElementById('anchor-p1');
+  p.innerHTML = P1_V2;
+  p.classList.remove('edited'); void p.offsetWidth; p.classList.add('edited');
+  rev++; document.getElementById('rev').innerHTML = `REV <b>${rev}</b> · updated just now (SSE)`;
+  renderAll();
+  const summary = state.annotations.map(a => `${a.id}:${(locById[a.id] || {}).status}`).join('  ');
+  toast('§2 rewritten → anchors re-resolved:  ' + summary);
+});
+document.getElementById('btn-inspector').addEventListener('click', () => {
+  inspector.style.display = inspector.style.display === 'block' ? 'none' : 'block';
+  renderInspector();
+});
+document.getElementById('btn-reset').addEventListener('click', () => {
+  document.getElementById('anchor-p1').innerHTML = P1_V1;
+  rev = 1; document.getElementById('rev').innerHTML = 'REV <b>1</b>';
+  seed(); renderAll(); toast('Reset to seeded state');
+});
+
+/* ---------- variant switching ---------- */
+function setVariant(v) {
+  document.body.dataset.variant = v;
+  document.getElementById('v-label').innerHTML = `<b>${v.toUpperCase()}</b> ${VARIANTS[v].slice(2)}`;
+  const url = new URL(location); url.searchParams.set('variant', v);
+  history.replaceState(null, '', url);
+  composer.hidden = true;
+  renderAll();
+}
+function cycle(d) {
+  const keys = Object.keys(VARIANTS);
+  const i = keys.indexOf(document.body.dataset.variant);
+  setVariant(keys[(i + d + keys.length) % keys.length]);
+}
+document.getElementById('v-prev').addEventListener('click', () => cycle(-1));
+document.getElementById('v-next').addEventListener('click', () => cycle(1));
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if (t.matches('input, textarea, [contenteditable]')) return;
+  if (e.key === 'ArrowLeft') cycle(-1);
+  if (e.key === 'ArrowRight') cycle(1);
+});
+
+/* ---------- seed ---------- */
+function seedAnnotation(quote, trail, comment, status, agentReply) {
+  const full = docText(); const i = full.indexOf(quote);
+  const a = MarginCore.addAnnotation(state, {
+    quote, trail, comment,
+    prefix: full.slice(Math.max(0, i - 40), i),
+    suffix: full.slice(i + quote.length, i + quote.length + 40),
+  });
+  a.status = status;
+  if (agentReply) a.replies.push({ by: 'agent', text: agentReply, ts: Date.now() });
+  return a;
+}
+function seed() {
+  state = MarginCore.createState();
+  seedAnnotation('margin list, margin reply, margin resolve', 'Transport',
+    'Should `margin open` be in this list too? That\'s the command I\'ll actually type.',
+    'read',
+    'Yes — adding `margin open <file>` as the primary entry point; spec updated.');
+  seedAnnotation('live-reloads over SSE', 'Status & replies',
+    'Will this yank my scroll position mid-read?', 'unread', null);
+  state.lastPayload = null;
+}
+
+/* ---------- boot ---------- */
+seed();
+setVariant(new URL(location).searchParams.get('variant') || 'a');
+window.addEventListener('resize', renderAll);
+</script>
+</body>
+</html>

@@ -57,7 +57,10 @@ export async function testDaemon(
     () =>
       new Promise<void>((resolvePromise) => {
         d.server.close(() => resolvePromise());
-        if (typeof d.server.closeIdleConnections === 'function') d.server.closeIdleConnections();
+        // close() waits for open connections; SSE event streams never close
+        // on their own, so force-destroy every connection (Node >= 18.2).
+        if (typeof d.server.closeAllConnections === 'function') d.server.closeAllConnections();
+        else if (typeof d.server.closeIdleConnections === 'function') d.server.closeIdleConnections();
       })
   );
   return { home: h, port: d.port, token, server: d.server, ctx: d.ctx };

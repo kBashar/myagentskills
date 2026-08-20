@@ -12,6 +12,8 @@ declare class Buffer {
 }
 
 declare function setTimeout(callback: (...args: any[]) => void, ms: number): unknown;
+declare function setInterval(callback: (...args: any[]) => void, ms: number): { unref(): void };
+declare function clearInterval(handle: unknown): void;
 
 declare const __dirname: string;
 
@@ -52,19 +54,24 @@ declare module 'node:http' {
     headers: Record<string, string | string[] | undefined>;
     on(event: string, listener: (...args: any[]) => void): void;
     resume(): void;
+    setEncoding(encoding: string): void;
   }
   export interface ServerResponse {
     readonly headersSent: boolean;
     readonly writableEnded: boolean;
     writeHead(status: number, headers?: Record<string, string | number>): void;
+    write(data: string | Buffer): void;
+    on(event: string, listener: (...args: any[]) => void): void;
     end(body?: string | Buffer): void;
   }
   export interface Server {
     listen(port: number, host: string, callback?: () => void): void;
     once(event: string, listener: (...args: any[]) => void): void;
+    on(event: string, listener: (...args: any[]) => void): void;
     removeListener(event: string, listener: (...args: any[]) => void): void;
     address(): { port: number };
     close(callback?: () => void): void;
+    closeAllConnections?(): void;
     closeIdleConnections?(): void;
   }
   export interface RequestOptions {
@@ -83,6 +90,7 @@ declare module 'node:http' {
   }
   export function createServer(listener: (req: IncomingMessage, res: ServerResponse) => void): Server;
   export function request(options: RequestOptions, callback: (res: IncomingMessage) => void): ClientRequest;
+  export function get(options: RequestOptions, callback: (res: IncomingMessage) => void): ClientRequest;
 }
 
 declare module 'node:fs' {
