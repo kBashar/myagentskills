@@ -79,14 +79,13 @@ say "CONFLICTED_FILES=${#files[@]}"
 [ "${#files[@]}" -eq 0 ] && exit 0
 
 # 2 --- helpers ---------------------------------------------------------------
-# blame_side <branch> <path> <block-text>: blame the block's lines in <branch>.
+# blame_side <branch> <path> <block-text> <line-count>: blame the block's lines in <branch>.
 blame_side() {
-  local branch="$1" path="$2" block="$3" hits start end k
-  if [ -z "$block" ]; then
+  local branch="$1" path="$2" block="$3" k="$4" hits start end
+  if [ "$k" -eq 0 ]; then
     say "BLAME $branch: no lines on this side ($branch removed or never had the base text here)."
     return
   fi
-  k=$(printf '%s\n' "$block" | wc -l)
   # Find every start line where the whole block matches the branch's file.
   hits=$(awk -v k="$k" 'NR==FNR { b[++n]=$0; next }
                          { f[++m]=$0 }
@@ -137,12 +136,13 @@ for path in "${files[@]}"; do
     continue
   fi
 
-  hunk=0; state=""; ours=""; theirs=""; text=""; start=0; ln=0
+  # Count each side's lines: an empty first line must still count as a line.
+  hunk=0; state=""; ours=""; theirs=""; ours_n=0; theirs_n=0; text=""; start=0; ln=0
   while IFS= read -r line || [ -n "$line" ]; do
     ln=$((ln + 1))
     case "$state:$line" in
       ":<<<<<<< "*)
-        hunk=$((hunk + 1)); state=ours; start=$ln; ours=""; theirs=""; text="$line" ;;
+        hunk=$((hunk + 1)); state=ours; start=$ln; ours=""; theirs=""; ours_n=0; theirs_n=0; text="$line" ;;
       ours:"||||||| "*) state=base; text+=$'\n'"$line" ;;
       ours:"=======" | base:"=======") state=theirs; text+=$'\n'"$line" ;;
       theirs:">>>>>>> "*)
@@ -150,12 +150,12 @@ for path in "${files[@]}"; do
         conflict=$((conflict + 1))
         say "--- CONFLICT $conflict: hunk $hunk of this file, merged lines $start-$ln"
         say "$text"
-        blame_side "$FIRST" "$path" "$ours"
-        blame_side "$SECOND" "$path" "$theirs"
+        blame_side "$FIRST" "$path" "$ours" "$ours_n"
+        blame_side "$SECOND" "$path" "$theirs" "$theirs_n"
         state="" ;;
-      ours:*) text+=$'\n'"$line"; ours+="${ours:+$'\n'}$line" ;;
+      ours:*) text+=$'\n'"$line"; [ "$ours_n" -gt 0 ] && ours+=$'\n'; ours+="$line"; ours_n=$((ours_n + 1)) ;;
       base:*) text+=$'\n'"$line" ;;
-      theirs:*) text+=$'\n'"$line"; theirs+="${theirs:+$'\n'}$line" ;;
+      theirs:*) text+=$'\n'"$line"; [ "$theirs_n" -gt 0 ] && theirs+=$'\n'; theirs+="$line"; theirs_n=$((theirs_n + 1)) ;;
     esac
   done <<<"$merged"
 done

@@ -35,7 +35,7 @@
 } }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.5; }
-.wrap { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; gap: 28px; }
+.wrap { max-width: 1600px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; gap: 28px; }
 h1, h2 { font-weight: 600; text-wrap: balance; margin: 0; }
 h1 { font-size: 24px; }
 h2 { font-size: 18px; }
@@ -74,8 +74,8 @@ td .why { display: block; font-size: 12px; color: var(--muted); margin-top: 3px;
 .kind { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
 .base { display: flex; gap: 10px; align-items: baseline; padding: 8px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 12.5px; min-width: 0; }
 .base .lbl { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); flex: none; }
-.base pre { margin: 0; overflow-x: auto; min-width: 0; }
-.cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.base .lines { margin: 0; min-width: 0; flex: 1; max-height: 14em; overflow: auto; }
+.cols { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1fr); }
 .col { padding: 14px 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
 .col + .col { border-left: 1px solid var(--line); }
 .col-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
@@ -84,15 +84,17 @@ td .why { display: block; font-size: 12px; color: var(--muted); margin-top: 3px;
   .cols { grid-template-columns: minmax(0, 1fr); }
   .col + .col { border-left: 0; border-top: 1px solid var(--line); }
 }
-.code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; font-size: 12.5px; }
-.code .ln { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 1px 10px 1px 0; }
-.code .who { font-size: 11px; color: var(--muted); padding-left: 10px; min-width: 10em; border-right: 3px solid transparent; white-space: nowrap; font-variant-numeric: tabular-nums; font-family: var(--font-body); }
+/* Long lines wrap in place; a wrapped line continues with a 2ch hanging indent. */
+.cl { display: block; white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 2ch; text-indent: -2ch; min-height: 1.5em; }
+.code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font-size: 12.5px; }
+.code .ln { display: grid; grid-template-columns: 10ch minmax(0, 1fr); gap: 8px; padding: 1px 10px 1px 0; }
+.code .who { font-family: var(--font-code); font-size: 11px; color: var(--muted); padding-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-right: 3px solid transparent; }
 .first-side .ln.changed .who { border-right-color: var(--first); }
 .second-side .ln.changed .who { border-right-color: var(--second); }
 .code .ln.base-line { color: var(--muted); }
-.code code { white-space: pre; }
+
 .code .empty { padding: 8px 12px; color: var(--muted); font-style: italic; font-family: var(--font-body); }
-.diff { margin: 0; padding: 8px 12px; white-space: pre; }
+.diff { margin: 0; padding: 8px 12px; }
 .diff .add { color: var(--add); }
 .diff .del { color: var(--del); }
 .diff .hdr { color: var(--muted); }
@@ -109,10 +111,10 @@ td .why { display: block; font-size: 12px; color: var(--muted); margin-top: 3px;
 .seg button[aria-pressed="true"] { border-color: var(--fg); background: var(--fg); color: var(--surface); }
 .seg button:focus-visible, td a:focus-visible { outline: 2px solid var(--first); outline-offset: 2px; }
 .preview-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.result { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; overflow-x: auto; font-size: 12.5px; margin: 0; white-space: pre; }
+.result { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; font-size: 12.5px; margin: 0; }
 .result .from-first { color: var(--first); }
 .result .from-second { color: var(--second); }
-.result .muted { white-space: pre-wrap; font-family: var(--font-body); }
+.result .muted { font-family: var(--font-body); }
 .error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 12px 16px; }
 footer { font-size: 12px; color: var(--muted); }
 @media (prefers-reduced-motion: no-preference) { .seg button { transition: background 120ms, color 120ms; } }
@@ -272,7 +274,7 @@ function render(F, IMP) {
     if (!c.markers) {
       const d = c.diff[i].trimEnd();
       body = d ? `<div class="code"><pre class="diff">${d.split("\n").map(l =>
-        `<span class="${/^(\+\+\+|---|diff |index |@@|new file|deleted file|similarity|rename|Binary)/.test(l) ? "hdr" : l[0] === "+" ? "add" : l[0] === "-" ? "del" : ""}">${esc(l)}</span>`).join("\n")}</pre></div>`
+        `<span class="cl ${/^(\+\+\+|---|diff |index |@@|new file|deleted file|similarity|rename|Binary)/.test(l) ? "hdr" : l[0] === "+" ? "add" : l[0] === "-" ? "del" : ""}">${esc(l)}</span>`).join("")}</pre></div>`
         : `<div class="code"><div class="empty">No change since the base.</div></div>`;
     } else if (!c.lines[cls].length) {
       const note = c.sideNote[i] || "no lines on this side";
@@ -281,8 +283,9 @@ function render(F, IMP) {
       const bl = c.blame[i];
       body = `<div class="code ${cls}-side">` + c.lines[cls].map((t, j) => {
         const b = bl.length === c.lines[cls].length ? bl[j] : null;
-        const who = b ? (b.boundary ? "base" : `${esc(b.author)} · ${esc(b.date)}`) : "";
-        return `<div class="ln ${b && !b.boundary ? "changed" : "base-line"}"><span class="who">${who}</span><code>${esc(t) || " "}</code></div>`;
+        const who = !b ? "" : b.boundary ? "base" : b.sha.slice(0, 7);
+        const tip = !b ? "" : b.boundary ? "Unchanged since the merge base" : `${b.author} · ${b.date}`;
+        return `<div class="ln ${b && !b.boundary ? "changed" : "base-line"}"><span class="who" title="${esc(tip)}">${who}</span><code class="cl">${esc(t)}</code></div>`;
       }).join("") + `</div>`;
     }
     const s = sourcesOf(c, i);
@@ -294,7 +297,7 @@ function render(F, IMP) {
   const cards = `<section aria-labelledby="details"><h2 id="details">Conflicts</h2><div class="cards">${F.conflicts.map(c => {
     const imp = IMP[c.n] || {};
     const base = !c.markers ? "" : `<div class="base"><span class="lbl">Base</span>${c.lines.base.length
-      ? `<pre>${esc(c.lines.base.join("\n"))}</pre>` : `<span class="muted">${/add\/add/.test(kindOf(c.file)) ? "The file did not exist." : "No lines here in the base."}</span>`}</div>`;
+      ? `<pre class="lines">${c.lines.base.map(t => `<span class="cl">${esc(t)}</span>`).join("")}</pre>` : `<span class="muted">${/add\/add/.test(kindOf(c.file)) ? "The file did not exist." : "No lines here in the base."}</span>`}</div>`;
     return `<article class="card" id="conflict-${c.n}" data-n="${c.n}">
       <div class="card-head"><span class="num">${c.n}</span><span class="path">${esc(c.file.path)}</span>
         <span class="kind">${esc(kindOf(c.file))}</span>${imp.title ? `<span class="title">${esc(imp.title)}</span>` : ""}
@@ -316,10 +319,10 @@ function render(F, IMP) {
 
   const resultOf = (c, k) => {
     if (!c.markers) return `<span class="muted">No merged text for this kind of conflict. See the implication above.</span>`;
-    const f = c.lines.first.map(t => `<span class="from-first">${esc(t) || " "}</span>`);
-    const s = c.lines.second.map(t => `<span class="from-second">${esc(t) || " "}</span>`);
+    const f = c.lines.first.map(t => `<span class="cl from-first">${esc(t)}</span>`);
+    const s = c.lines.second.map(t => `<span class="cl from-second">${esc(t)}</span>`);
     const out = k === "first" ? f : k === "second" ? s : f.concat(s);
-    return out.length ? out.join("\n") : `<span class="muted">(no lines)</span>`;
+    return out.length ? out.join("") : `<span class="muted">(no lines)</span>`;
   };
   const show = (card, k) => {
     const c = F.conflicts.find(x => x.n === +card.dataset.n), e = (IMP[c.n] || {})[k];
