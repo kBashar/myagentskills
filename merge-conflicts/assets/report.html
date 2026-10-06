@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merge conflicts</title>
+<style>
+/* Layout: overview table first, then one card per conflict whose body is three
+   columns: first branch | second branch | implications. Columns stack on narrow screens. */
+:root {
+  --bg: #f5f7fa; --surface: #ffffff; --surface-2: #eef1f6; --code-bg: #f3f5f9;
+  --fg: #19202c; --muted: #586274; --line: #d8dde6;
+  --first: #1d5bbf; --first-soft: #e2ecfb;
+  --second: #8a3db6; --second-soft: #f1e6f8;
+  --ok: #1d7a46; --ok-soft: #e0f2e7;
+  --warn: #8f5b00; --warn-soft: #faefd6;
+  --bad: #b3261e; --bad-soft: #fbe4e1;
+  --na: #586274; --na-soft: #eaedf2;
+  --add: #1d7a46; --del: #b3261e;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-code: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f131a; --surface: #161b24; --surface-2: #1d2330; --code-bg: #11161f;
+  --fg: #e3e7ee; --muted: #98a2b3; --line: #2a3140;
+  --first: #82b1ff; --first-soft: #15253d;
+  --second: #d39cf3; --second-soft: #29193a;
+  --ok: #72d49c; --ok-soft: #10301e;
+  --warn: #efc063; --warn-soft: #32270f;
+  --bad: #ff8e84; --bad-soft: #391714;
+  --na: #98a2b3; --na-soft: #212734;
+  --add: #72d49c; --del: #ff8e84;
+  color-scheme: dark;
+} }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; display: grid; gap: 28px; }
+h1, h2 { font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: 24px; }
+h2 { font-size: 18px; }
+p { margin: 0; }
+code, pre, .mono { font-family: var(--font-code); }
+.muted { color: var(--muted); }
+.page-head { display: grid; gap: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.note { font-size: 13px; color: var(--warn); }
+.br { font-family: var(--font-code); font-size: 0.92em; font-weight: 500; padding: 1px 7px; border-radius: 4px; white-space: nowrap; }
+.br.first { color: var(--first); background: var(--first-soft); }
+.br.second { color: var(--second); background: var(--second-soft); }
+.sha { font-family: var(--font-code); font-size: 12px; color: var(--muted); }
+section { display: grid; gap: 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 12px; }
+
+/* overview table */
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; min-width: 980px; font-size: 13px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td a { color: var(--fg); }
+td .path { font-family: var(--font-code); font-size: 12.5px; overflow-wrap: anywhere; }
+td .by { display: block; font-size: 12px; color: var(--muted); }
+td .why { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; max-width: 30ch; }
+
+/* conflict cards */
+.cards { display: grid; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; scroll-margin-top: 16px; }
+.card:target { outline: 2px solid var(--first); outline-offset: 2px; }
+.card-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.card-head .num { font-family: var(--font-code); color: var(--muted); font-size: 12px; }
+.card-head .path { font-family: var(--font-code); font-weight: 500; overflow-wrap: anywhere; }
+.card-head .title { font-weight: 500; }
+.kind { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; }
+.base { display: flex; gap: 10px; align-items: baseline; padding: 8px 16px; background: var(--surface-2); border-bottom: 1px solid var(--line); font-size: 12.5px; min-width: 0; }
+.base .lbl { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); flex: none; }
+.base pre { margin: 0; overflow-x: auto; min-width: 0; }
+.cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.col { padding: 14px 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.col + .col { border-left: 1px solid var(--line); }
+.col-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.col.impl { background: var(--surface-2); }
+@media (max-width: 900px) {
+  .cols { grid-template-columns: minmax(0, 1fr); }
+  .col + .col { border-left: 0; border-top: 1px solid var(--line); }
+}
+.code { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; font-size: 12.5px; }
+.code .ln { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 1px 10px 1px 0; }
+.code .who { font-size: 11px; color: var(--muted); padding-left: 10px; min-width: 10em; border-right: 3px solid transparent; white-space: nowrap; font-variant-numeric: tabular-nums; font-family: var(--font-body); }
+.first-side .ln.changed .who { border-right-color: var(--first); }
+.second-side .ln.changed .who { border-right-color: var(--second); }
+.code .ln.base-line { color: var(--muted); }
+.code code { white-space: pre; }
+.code .empty { padding: 8px 12px; color: var(--muted); font-style: italic; font-family: var(--font-body); }
+.diff { margin: 0; padding: 8px 12px; white-space: pre; }
+.diff .add { color: var(--add); }
+.diff .del { color: var(--del); }
+.diff .hdr { color: var(--muted); }
+.sources { display: grid; gap: 4px; font-size: 12.5px; }
+.sources .s { display: flex; flex-wrap: wrap; gap: 0 8px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.chip.ok { color: var(--ok); background: var(--ok-soft); }
+.chip.warn { color: var(--warn); background: var(--warn-soft); }
+.chip.bad { color: var(--bad); background: var(--bad-soft); }
+.chip.na { color: var(--na); background: var(--na-soft); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button { font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+.seg button[aria-pressed="true"] { border-color: var(--fg); background: var(--fg); color: var(--surface); }
+.seg button:focus-visible, td a:focus-visible { outline: 2px solid var(--first); outline-offset: 2px; }
+.preview-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.result { background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; overflow-x: auto; font-size: 12.5px; margin: 0; white-space: pre; }
+.result .from-first { color: var(--first); }
+.result .from-second { color: var(--second); }
+.result .muted { white-space: pre-wrap; font-family: var(--font-body); }
+.error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 12px 16px; }
+footer { font-size: 12px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { .seg button { transition: background 120ms, color 120ms; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><p class="muted">Loading the report…</p></div>
+
+<!-- render.sh replaces the two placeholders with base64 text: the output of
+     conflicts.sh, and the implication lines written by the analysis. -->
+<script id="facts" type="text/plain">__FACTS_B64__</script>
+<script id="implications" type="text/plain">__IMPL_B64__</script>
+<script>
+"use strict";
+const STATUS = {
+  runs: ["ok", "Runs"], drops: ["warn", "Drops a change"], silent: ["warn", "Silent override"],
+  throws: ["bad", "Throws at runtime"], noload: ["bad", "Does not load"],
+  impossible: ["na", "Not possible"], unknown: ["na", "Not determined"]
+};
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function decode(id) {
+  const raw = document.getElementById(id).textContent.trim();
+  const bytes = Uint8Array.from(atob(raw), c => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+// Parse the line-based output of conflicts.sh. Side blocks (COMMITS, BLAME,
+// DIFF) always come first-branch then second-branch, so order decides the side.
+function parseFacts(text) {
+  const f = { repo: "", first: {}, second: {}, base: {}, notes: [], files: [], conflicts: [] };
+  const blameRe = /^(\^?[0-9a-f]{4,40})(?: [^(]*)? \((.*?) +(\d{4}-\d{2}-\d{2}) +(\d+)\) ?(.*)$/;
+  let file = null, cur = null, mode = null, part = null, side = -1;
+  for (const line of text.split("\n")) {
+    if (mode === "hunk") {
+      if (line.startsWith(">>>>>>> ")) { mode = null; continue; }
+      if (part === "first" && line.startsWith("||||||| ")) { part = "base"; continue; }
+      if ((part === "first" || part === "base") && line === "=======") { part = "second"; continue; }
+      cur.lines[part].push(line);
+      continue;
+    }
+    let m;
+    if (mode === "commits" && (m = line.match(/^ {2}(\S+) (\S+) (.*?) {2}(.*)$/))) {
+      file.commits[side].push({ sha: m[1], date: m[2], author: m[3], subject: m[4] }); continue;
+    }
+    if (mode === "blame" && (m = line.match(blameRe))) {
+      cur.blame[side].push({ sha: m[1].replace(/^\^/, ""), boundary: m[1].startsWith("^"), author: m[2].trim(), date: m[3], text: m[5] });
+      continue;
+    }
+    if (line.startsWith("=== FILE ")) {
+      file = { path: line.slice(9), types: [], commits: [[], []] };
+      f.files.push(file); mode = null; side = -1; continue;
+    }
+    if (line.startsWith("--- CONFLICT ") && file) {
+      m = line.match(/^--- CONFLICT (\d+): (.*)$/);
+      const markers = /^hunk /.test(m[2]);
+      cur = { n: +m[1], file, info: m[2], markers, lines: { first: [], base: [], second: [] },
+              blame: [[], []], range: [null, null], sideNote: [null, null], diff: ["", ""] };
+      f.conflicts.push(cur); mode = null; side = -1; continue;
+    }
+    if (line.startsWith("TOTAL_CONFLICTS=")) { mode = null; continue; }
+    if (mode === "diff" && !line.startsWith("DIFF ")) { cur.diff[side] += line + "\n"; continue; }
+    if (line.startsWith("REPO=")) f.repo = line.slice(5);
+    else if (line.startsWith("FIRST=") || line.startsWith("SECOND=")) {
+      const key = line.startsWith("FIRST=") ? "first" : "second";
+      const v = line.slice(line.indexOf("=") + 1), cut = v.lastIndexOf(" ");
+      f[key] = { name: v.slice(0, cut), sha: v.slice(cut + 1) };
+    } else if (line.startsWith("BASE=")) {
+      m = line.match(/^BASE=(\S+) (\S+) (.*?) {2}(.*)$/);
+      f.base = m ? { sha: m[1], date: m[2], author: m[3], subject: m[4] } : { sha: line.slice(5) };
+    } else if (line.startsWith("NOTE: ")) f.notes.push(line.slice(6));
+    else if (line.startsWith("TYPE: ") && file) file.types.push(line.slice(6));
+    else if (line.startsWith("COMMITS ") && file) { side++; mode = "commits"; }
+    else if (line.startsWith("<<<<<<< ") && cur && cur.markers) { mode = "hunk"; part = "first"; }
+    else if (line.startsWith("BLAME ") && cur) {
+      side++; mode = "blame";
+      if ((m = line.match(/\(lines (\d+)-(\d+) of /))) cur.range[side] = m[1] === m[2] ? m[1] : `${m[1]}-${m[2]}`;
+      else cur.sideNote[side] = line.slice(line.indexOf(":") + 1).trim();
+    } else if (line.startsWith("DIFF ") && cur) { side = side < 0 ? 0 : side + 1; mode = "diff"; }
+    else if (mode !== "diff") mode = mode === "blame" || mode === "commits" ? null : mode;
+  }
+  return f;
+}
+
+// Implication lines: "<n> title: <text>" or "<n> <first|second|both> <status>: <text>".
+function parseImplications(text) {
+  const imp = {};
+  for (const line of text.split("\n")) {
+    const m = line.match(/^(\d+) (title|first|second|both)(?: (\w+))?: (.*)$/);
+    if (!m) continue;
+    const e = (imp[m[1]] ||= {});
+    if (m[2] === "title") e.title = m[4];
+    else e[m[2]] = { status: m[3] || "unknown", text: m[4] };
+  }
+  return imp;
+}
+
+function kindOf(file) {
+  const kinds = [...new Set(file.types.map(t => (t.match(/CONFLICT \(([^)]+)\)/) || [])[1]).filter(Boolean))];
+  return kinds.join(" + ") || "conflict";
+}
+// Commits behind one side of a conflict: the blamed commits after the base,
+// or every commit on the file when there are no blamed lines.
+function sourcesOf(c, i) {
+  const commits = c.file.commits[i];
+  const seen = [];
+  for (const b of c.blame[i]) if (!b.boundary && !seen.some(s => s.sha === b.sha)) seen.push(b);
+  if (!seen.length) return { all: true, list: commits };
+  return { all: false, list: seen.map(b => commits.find(x => x.sha.startsWith(b.sha) || b.sha.startsWith(x.sha)) || { sha: b.sha.slice(0, 9), date: b.date, author: b.author, subject: "" }) };
+}
+
+function render(F, IMP) {
+  const A = F.first.name, B = F.second.name;
+  const br = (name, i) => `<span class="br ${i ? "second" : "first"}">${esc(name)}</span>`;
+  const chip = e => {
+    if (!e) return `<span class="chip warn">Missing</span>`;
+    const [cls, label] = STATUS[e.status] || ["na", e.status];
+    return `<span class="chip ${cls}">${esc(label)}</span>`;
+  };
+  const why = e => e ? e.text : "The analysis gave no implication for this conflict.";
+  const sideKey = ["first", "second"];
+  document.title = `Merge conflicts: ${B} into ${A}`;
+
+  const head = `<header class="page-head">
+    <h1>Merge conflicts: ${br(B, 1)} into ${br(A, 0)}</h1>
+    <div class="meta">
+      ${F.repo ? `<span class="mono">${esc(F.repo)}</span>` : ""}
+      <span class="sha">${esc(A)} ${esc(F.first.sha)} · ${esc(B)} ${esc(F.second.sha)} · merge base ${esc(F.base.sha)}${F.base.date ? ` (${esc(F.base.date)}, ${esc(F.base.subject)})` : ""}</span>
+      <span class="muted">${plural(F.files.length, "file")}, ${plural(F.conflicts.length, "conflict")}</span>
+    </div>
+    ${F.notes.map(n => `<p class="note">${esc(n)}</p>`).join("")}
+  </header>`;
+
+  const authors = (c, i) => {
+    const s = sourcesOf(c, i);
+    if (c.file.commits[i].length === 0) return `<span class="by">No change since the base</span>`;
+    const uniq = [...new Map(s.list.map(x => [x.author + x.date, x])).values()];
+    return uniq.map(x => `<span class="by">${esc(x.author)}, ${esc(x.date)}</span>`).join("");
+  };
+  const table = `<section aria-labelledby="overview">
+    <h2 id="overview">Overview</h2>
+    <div class="legend">${Object.keys(STATUS).map(k => chip({ status: k })).join("")}</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>File</th><th>${br(A, 0)}</th><th>${br(B, 1)}</th>
+        <th>Take ${br(A, 0)}</th><th>Take ${br(B, 1)}</th><th>Take both</th></tr></thead>
+      <tbody>${F.conflicts.map(c => { const imp = IMP[c.n] || {}; return `<tr>
+        <td class="mono"><a href="#conflict-${c.n}">${c.n}</a></td>
+        <td><span class="path">${esc(c.file.path)}</span><span class="by">${esc(imp.title || kindOf(c.file))}</span></td>
+        <td>${authors(c, 0)}</td><td>${authors(c, 1)}</td>
+        ${["first", "second", "both"].map(k => `<td>${chip(imp[k])}<span class="why">${esc(why(imp[k]))}</span></td>`).join("")}
+      </tr>`; }).join("")}</tbody>
+    </table></div></section>`;
+
+  const codeCol = (c, i) => {
+    const name = i ? B : A, cls = sideKey[i];
+    let body;
+    if (!c.markers) {
+      const d = c.diff[i].trimEnd();
+      body = d ? `<div class="code"><pre class="diff">${d.split("\n").map(l =>
+        `<span class="${/^(\+\+\+|---|diff |index |@@|new file|deleted file|similarity|rename|Binary)/.test(l) ? "hdr" : l[0] === "+" ? "add" : l[0] === "-" ? "del" : ""}">${esc(l)}</span>`).join("\n")}</pre></div>`
+        : `<div class="code"><div class="empty">No change since the base.</div></div>`;
+    } else if (!c.lines[cls].length) {
+      const note = c.sideNote[i] || "no lines on this side";
+      body = `<div class="code"><div class="empty">${esc(note[0].toUpperCase() + note.slice(1))}</div></div>`;
+    } else {
+      const bl = c.blame[i];
+      body = `<div class="code ${cls}-side">` + c.lines[cls].map((t, j) => {
+        const b = bl.length === c.lines[cls].length ? bl[j] : null;
+        const who = b ? (b.boundary ? "base" : `${esc(b.author)} · ${esc(b.date)}`) : "";
+        return `<div class="ln ${b && !b.boundary ? "changed" : "base-line"}"><span class="who">${who}</span><code>${esc(t) || " "}</code></div>`;
+      }).join("") + `</div>`;
+    }
+    const s = sourcesOf(c, i);
+    const label = c.markers ? (c.range[i] ? `lines ${c.range[i]}` : "") : "diff since the base";
+    return `<div class="col"><div class="col-title">${br(name, i)}<span class="mono">${esc(label)}</span></div>${body}
+      <div class="sources">${s.all && s.list.length ? `<span class="muted">Commits on this file since the base:</span>` : ""}
+      ${s.list.map(x => `<div class="s"><span class="sha">${esc(x.sha)}</span><span>${esc(x.author)}, ${esc(x.date)}</span><span class="muted">${esc(x.subject)}</span></div>`).join("")}</div></div>`;
+  };
+  const cards = `<section aria-labelledby="details"><h2 id="details">Conflicts</h2><div class="cards">${F.conflicts.map(c => {
+    const imp = IMP[c.n] || {};
+    const base = !c.markers ? "" : `<div class="base"><span class="lbl">Base</span>${c.lines.base.length
+      ? `<pre>${esc(c.lines.base.join("\n"))}</pre>` : `<span class="muted">${/add\/add/.test(kindOf(c.file)) ? "The file did not exist." : "No lines here in the base."}</span>`}</div>`;
+    return `<article class="card" id="conflict-${c.n}" data-n="${c.n}">
+      <div class="card-head"><span class="num">${c.n}</span><span class="path">${esc(c.file.path)}</span>
+        <span class="kind">${esc(kindOf(c.file))}</span>${imp.title ? `<span class="title">${esc(imp.title)}</span>` : ""}
+        <span class="muted mono">${esc(c.info)}</span></div>
+      ${base}
+      <div class="cols">${codeCol(c, 0)}${codeCol(c, 1)}
+        <div class="col impl"><div class="col-title">Implications</div>
+          <div class="seg" role="group" aria-label="Choose a resolution">
+            <button type="button" data-k="first" aria-pressed="true">Take ${esc(A)}</button>
+            <button type="button" data-k="second" aria-pressed="false">Take ${esc(B)}</button>
+            <button type="button" data-k="both" aria-pressed="false">Take both</button>
+          </div>
+          <div data-status></div><p data-why></p>
+          <span class="preview-label">Resulting text</span><pre class="result" data-result></pre>
+        </div></div></article>`; }).join("")}</div></section>`;
+
+  document.getElementById("app").innerHTML = head + table + cards +
+    `<footer>Made by the merge-conflicts skill from local refs. The page is a local file. The analysis did not change the repository.</footer>`;
+
+  const resultOf = (c, k) => {
+    if (!c.markers) return `<span class="muted">No merged text for this kind of conflict. See the implication above.</span>`;
+    const f = c.lines.first.map(t => `<span class="from-first">${esc(t) || " "}</span>`);
+    const s = c.lines.second.map(t => `<span class="from-second">${esc(t) || " "}</span>`);
+    const out = k === "first" ? f : k === "second" ? s : f.concat(s);
+    return out.length ? out.join("\n") : `<span class="muted">(no lines)</span>`;
+  };
+  const show = (card, k) => {
+    const c = F.conflicts.find(x => x.n === +card.dataset.n), e = (IMP[c.n] || {})[k];
+    card.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.k === k)));
+    card.querySelector("[data-status]").innerHTML = chip(e);
+    card.querySelector("[data-why]").textContent = why(e);
+    card.querySelector("[data-result]").innerHTML = resultOf(c, k);
+  };
+  document.querySelectorAll(".card").forEach(card => {
+    show(card, "first");
+    card.querySelector(".seg").addEventListener("click", ev => { const b = ev.target.closest("button"); if (b) show(card, b.dataset.k); });
+  });
+}
+
+try {
+  const facts = parseFacts(decode("facts"));
+  render(facts, parseImplications(decode("implications")));
+} catch (e) {
+  document.getElementById("app").innerHTML = `<p class="error">The page could not read the report data: ${esc(e.message)}</p>`;
+}
+</script>
+</body>
+</html>
